@@ -1,0 +1,100 @@
+2026-06-22 18:51:36 [INFO] Pipeline started
+2026-06-22 18:51:36 [INFO]   target:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\graphviz
+2026-06-22 18:51:36 [INFO]   output:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz
+2026-06-22 18:51:36 [INFO]   log:      E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\log\pipeline_20260622_185136.log
+2026-06-22 18:51:36 [INFO] >>> Starting Phase 1: Program Analysis
+2026-06-22 18:51:36 [INFO] 
+2026-06-22 18:51:36 [INFO] ============================================================
+2026-06-22 18:51:36 [INFO]   Phase 1 — Running...
+2026-06-22 18:51:36 [INFO] ============================================================
+2026-06-22 18:51:36 [INFO] [Phase 1] waiting for agent response...
+2026-06-22 18:51:36 [INFO] [Phase 1] session started
+2026-06-22 18:51:41 [INFO] [Phase 1] I'll start analyzing the Graphviz project. Let me begin with Phase 0: Discovering all CLI tools.
+2026-06-22 18:51:45 [INFO] [Phase 1] Let me get more details on all the tools.
+2026-06-22 18:51:55 [INFO] [Phase 1] Excellent! I've discovered all the CLI tools. Let me now create tasks to track progress and begin analyzing each tool systematically.
+2026-06-22 18:52:03 [INFO] [Phase 1] Let me read the main entry files for all the major tools.
+2026-06-22 18:52:05 [INFO] [Phase 1] Now let me read the remaining major tools' entry files.
+2026-06-22 18:52:14 [INFO] [Phase 1] Now let me read the remaining tool entry points and the gvpr argument parsing.
+2026-06-22 18:52:17 [INFO] [Phase 1] Let me now read a few more key tools and then start building the output files.
+2026-06-22 18:52:20 [INFO] [Phase 1] Let me quickly read the remaining tools and the gvpr argument parsing.
+2026-06-22 18:52:23 [INFO] [Phase 1] Let me read the remaining key source files and the gvpr argument handling.
+2026-06-22 18:52:39 [INFO] [Phase 1] Now I have enough data to create comprehensive output files. Let me also quickly check how gvParseArgs works for dot.
+2026-06-22 18:53:09 [INFO] [Phase 1] Excellent! I now have a comprehensive understanding of all tools. Let me create the output directory and generate all four output files.
+2026-06-22 18:53:12 [INFO] [Phase 1] Now let me create the comprehensive output files. Starting with `command_combinations.json`:
+2026-06-22 18:54:19 [INFO] [Phase 1] Now let me create the call_tree.md file:
+2026-06-22 18:55:04 [INFO] [Phase 1] Now the `coverage_summary.md` file:
+2026-06-22 18:55:24 [INFO] [Phase 1] Now the vulnerability scoring file:
+2026-06-22 18:56:10 [INFO] [Phase 1] Now let me verify the files were saved correctly and update task statuses.
+2026-06-22 18:56:12 [INFO] [Phase 1] All four output files have been successfully saved. Let me finalize the remaining tasks.
+2026-06-22 18:56:18 [INFO] [Phase 1] ---
+
+## Program Analysis Complete ✅
+
+I've completed the full program analysis of the **Graphviz** project. All output files have been saved to:
+
+```
+E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\
+```
+
+### 📁 Files Generated
+
+| File | Size | Description |
+|------|------|-------------|
+| **command_combinations.json** | 34 KB | 18 CLI tools with full parameter tables and 40+ command combinations |
+| **call_tree.md** | 20 KB | Deepest call chain trees for **dot**, **
+2026-06-22 18:56:18 [INFO] [Phase 1] ---
+
+## Program Analysis Complete ✅
+
+I've completed the full program analysis of the **Graphviz** project. All output files have been saved to:
+
+```
+E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\
+```
+
+### 📁 Files Generated
+
+| File | Size | Description |
+|------|------|-------------|
+| **command_combinations.json** | 34 KB | 18 CLI tools with full parameter tables and 40+ command combinations |
+| **call_tree.md** | 20 KB | Deepest call chain trees for **dot**, **
+2026-06-22 18:56:18 [INFO] [Phase 1] agent completed
+2026-06-22 18:56:18 [INFO] 
+2026-06-22 18:56:18 [INFO] ============================================================
+2026-06-22 18:56:18 [INFO]   Phase 1 — Complete (4132 messages, 282.5s)
+2026-06-22 18:56:18 [INFO] ============================================================
+2026-06-22 18:56:18 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\command_combinations.json (33.2 KB)
+2026-06-22 18:56:18 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\vulnerability_path_scores.md (14.9 KB)
+2026-06-22 18:56:18 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\call_tree.md (19.6 KB)
+2026-06-22 18:56:18 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\coverage_summary.md (7.3 KB)
+2026-06-22 18:56:18 [INFO] [transfer] ensuring project source in container...
+2026-06-22 18:56:18 [INFO] [container] connecting...
+2026-06-22 18:56:18 [INFO] [container] name=afl  exists=True  running=True  status=running
+2026-06-22 18:56:18 [INFO] [container] 已就绪
+2026-06-22 18:56:18 [INFO] AFL++ in container: /usr/local/bin/afl-fuzz
+afl-fuzz++4.41a
+2026-06-22 18:56:18 [INFO] [container] afl-fuzz 可用
+2026-06-22 18:56:18 [INFO] [transfer] copying project source to container: /workspace/graphviz
+2026-06-22 18:57:20 [WARNING] [transfer] failed to ensure project source in container: ('Connection aborted.', TimeoutError())
+2026-06-22 18:57:20 [INFO] 
+2026-06-22 18:57:20 [INFO] ============================================================
+2026-06-22 18:57:20 [INFO]   Pipeline Complete! (total 344.5s)
+2026-06-22 18:57:20 [INFO] ============================================================
+2026-06-22 18:57:20 [INFO] 
+2026-06-22 18:57:20 [INFO] Artifacts:
+2026-06-22 18:57:20 [INFO]   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz/
+2026-06-22 18:57:20 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\command_combinations.json (33.2 KB)
+2026-06-22 18:57:20 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\call_tree.md (19.6 KB)
+2026-06-22 18:57:20 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\coverage_summary.md (7.3 KB)
+2026-06-22 18:57:20 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\vulnerability_path_scores.md (14.9 KB)
+2026-06-22 18:57:20 [WARNING]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_manifest.json (NOT YET CREATED)
+2026-06-22 18:57:20 [WARNING]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\issues\SUMMARY.md (NOT YET CREATED)
+2026-06-22 18:57:20 [INFO] ============================================================
+2026-06-22 18:57:20 [INFO]   Pipeline State Check
+2026-06-22 18:57:20 [INFO] ============================================================
+2026-06-22 18:57:20 [INFO]   [OK] COMPLETE Phase 1: Program Analysis
+2026-06-22 18:57:20 [INFO]   [..] PENDING Phase 2: Preprocess
+2026-06-22 18:57:20 [INFO]   [..] PENDING Phase 3: Execute Fuzz
+2026-06-22 18:57:20 [INFO]   [..] PENDING Phase 4: Issue Generator
+2026-06-22 18:57:20 [INFO] ============================================================
+2026-06-22 18:57:20 [INFO] Pipeline finished

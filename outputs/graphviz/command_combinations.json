@@ -1,0 +1,486 @@
+{
+  "project": "graphviz",
+  "version": "12.x",
+  "build_system": "cmake",
+  "total_tools": 27,
+  "tools": [
+    {
+      "name": "dot",
+      "entry_file": "cmd/dot/dot.c",
+      "description": "Main rendering program for various layouts and output formats. Aliases (symlinks to dot) auto-select layout engine: circo, fdp, neato, osage, patchwork, sfdp, twopi",
+      "language": "C",
+      "arg_parsing": "gvParseArgs() in lib/common/args.c -> dotneato_args_initialize() in lib/common/input.c",
+      "parameters": [
+        {"flag": "-T<format>", "type": "arg", "description": "Output format (png, svg, pdf, ps, jpeg, gif, json, dot, xdot, etc.)"},
+        {"flag": "-K<layout>", "type": "arg", "description": "Layout engine (dot, neato, fdp, sfdp, twopi, circo, osage, patchwork)"},
+        {"flag": "-G<name>=<val>", "type": "arg", "description": "Set graph attribute"},
+        {"flag": "-N<name>=<val>", "type": "arg", "description": "Set node attribute"},
+        {"flag": "-E<name>=<val>", "type": "arg", "description": "Set edge attribute"},
+        {"flag": "-A<name>=<val>", "type": "arg", "description": "Set graph+node+edge attribute"},
+        {"flag": "-l<lib>", "type": "arg", "description": "Load plugin library"},
+        {"flag": "-o<file>", "type": "arg", "description": "Output file"},
+        {"flag": "-O", "type": "flag", "description": "Auto-output filename"},
+        {"flag": "-q[lvl]", "type": "opt_arg", "description": "Set warning level (1=AGERR, 2=AGMAX)"},
+        {"flag": "-s<scale>", "type": "arg", "description": "Set input scale (points per inch)"},
+        {"flag": "-v[lvl]", "type": "opt_arg", "description": "Verbose mode"},
+        {"flag": "-x", "type": "flag", "description": "Reduce graph (neato mode)"},
+        {"flag": "-y", "type": "flag", "description": "Invert y coordinate"},
+        {"flag": "-n[lvl]", "type": "opt_arg", "description": "Neato layout mode (nop)"},
+        {"flag": "-L<param>=<val>", "type": "arg", "description": "FDP-specific params: Lg, LO, Lm<n>, Ln<n>, LU, LC<v>, LT<v>"},
+        {"flag": "-c", "type": "flag", "description": "Configure plugins (admin only)"},
+        {"flag": "-P", "type": "flag", "description": "Generate plugin graph"},
+        {"flag": "-V", "type": "flag", "description": "Print version"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"},
+        {"flag": "--help", "type": "flag", "description": "Print help"},
+        {"flag": "--filepath=<path>", "type": "arg", "description": "Set file search path"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["dot", "-Tpng", "-Kdot", "-o", "out.png", "in.gv"], "params": {"T": "png", "K": "dot", "o": "out.png", "input": "in.gv"}, "description": "Basic dot layout to PNG"},
+        {"id": 2, "command": ["dot", "-Tsvg", "-Kneato", "-o", "out.svg", "in.gv"], "params": {"T": "svg", "K": "neato", "o": "out.svg", "input": "in.gv"}, "description": "Neato layout to SVG"},
+        {"id": 3, "command": ["dot", "-Tpdf", "-Kfdp", "-o", "out.pdf", "-v", "-x", "-y", "in.gv"], "params": {"T": "pdf", "K": "fdp", "o": "out.pdf", "v": true, "x": true, "y": true, "input": "in.gv"}, "description": "FDP layout with verbose + reduce + invert"},
+        {"id": 4, "command": ["neato", "-Tpng", "-n2", "-Goverlap=false", "-Gsplines=true", "-o", "out.png", "in.gv"], "params": {"T": "png", "n": "2", "G": "overlap=false,splines=true", "o": "out.png", "input": "in.gv"}, "description": "Neato layout with nop mode 2, custom graph attributes"},
+        {"id": 5, "command": ["dot", "-Tjson", "-Kcirco", "-Grankdir=LR", "-Nshape=box", "-Ecolor=red", "-o", "out.json", "in.gv"], "params": {"T": "json", "K": "circo", "G": "rankdir=LR", "N": "shape=box", "E": "color=red", "o": "out.json", "input": "in.gv"}, "description": "Circo layout to JSON with full attribute stacks"},
+        {"id": 6, "command": ["dot", "-Tps", "-Ktwopi", "-s2", "-q1", "-y", "-o", "out.ps", "in.gv"], "params": {"T": "ps", "K": "twopi", "s": "2", "q": "1", "y": true, "o": "out.ps", "input": "in.gv"}, "description": "Twopi with scale, quiet, invert, PostScript output"},
+        {"id": 7, "command": ["sfdp", "-Tpng", "-Goverlap=prism", "-Gsplines=true", "-Gsep=+1", "-o", "out.png", "in.gv"], "params": {"T": "png", "G": "overlap=prism,splines=true,sep=+1", "o": "out.png", "input": "in.gv"}, "description": "SFDP with overlap removal and splines"},
+        {"id": 8, "command": ["dot", "-Tpng", "-Kosage", "-GpackMode=graph", "-Gpack=12", "-o", "out.png", "in.gv"], "params": {"T": "png", "K": "osage", "G": "packMode=graph,pack=12", "o": "out.png", "input": "in.gv"}, "description": "Osage layout with graph packing"},
+        {"id": 9, "command": ["dot", "-Tpng", "-Kpatchwork", "-o", "out.png", "in.gv"], "params": {"T": "png", "K": "patchwork", "o": "out.png", "input": "in.gv"}, "description": "Patchwork treemap layout"},
+        {"id": 10, "command": ["dot", "-Txdot", "-Kdot", "-Lg", "-Lm50", "-LT*0.5", "-o", "out.xdot", "in.gv"], "params": {"T": "xdot", "K": "dot", "Lg": true, "Lm": "50", "LT": "*0.5", "o": "out.xdot", "input": "in.gv"}, "description": "Xdot output with FDP-specific flags (also accepted by dot)"},
+        {"id": 11, "command": ["dot", "-Tgtk", "-Kneato", "-q1", "-o", "out.gv", "in.gv"], "params": {"T": "gtk", "K": "neato", "q": "1", "o": "out.gv", "input": "in.gv"}, "description": "Neato with GTK output, quiet level 1"},
+        {"id": 12, "command": ["dot", "-Tpng", "-Kdot", "-lgl", "-Gbgcolor=black", "-Nfontcolor=white", "-o", "out.png", "in.gv"], "params": {"T": "png", "K": "dot", "l": "gl", "G": "bgcolor=black", "N": "fontcolor=white", "o": "out.png", "input": "in.gv"}, "description": "Dot layout with extra plugin library + dark theme"}
+      ]
+    },
+    {
+      "name": "edgepaint",
+      "entry_file": "cmd/edgepaint/edgepaintmain.c",
+      "description": "Edge coloring to disambiguate crossing edges",
+      "language": "C",
+      "arg_parsing": "getopt_long() in init() at line 99",
+      "parameters": [
+        {"flag": "--accuracy=<e>", "type": "arg", "description": "Accuracy for optimal coloring (default 0.01)"},
+        {"flag": "--angle=<a>", "type": "arg", "description": "Angle threshold for edge crossing conflicts (default 15)"},
+        {"flag": "--color_scheme=<c>", "type": "arg", "description": "Color palette: rgb, gray, lab (default), Brewer scheme, or hex list"},
+        {"flag": "--random_seed=<s>", "type": "arg", "description": "Random seed (int); negative does multiple iterations"},
+        {"flag": "--lightness=<l1,l2>", "type": "arg", "description": "Lightness range for LAB scheme (default 0,70)"},
+        {"flag": "--share_endpoint", "type": "flag", "description": "Exclude parallel edges sharing endpoints from conflict"},
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"},
+        {"flag": "-v", "type": "flag", "description": "Verbose mode"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["edgepaint", "-o", "out.gv", "in.gv"], "params": {"o": "out.gv", "input": "in.gv"}, "description": "Basic edge coloring with defaults"},
+        {"id": 2, "command": ["edgepaint", "--angle=30", "--accuracy=0.001", "--color_scheme=rgb", "-v", "-o", "out.gv", "in.gv"], "params": {"angle": "30", "accuracy": "0.001", "color_scheme": "rgb", "v": true, "o": "out.gv", "input": "in.gv"}, "description": "Full edge coloring with custom params"},
+        {"id": 3, "command": ["edgepaint", "--random_seed=-5", "--lightness=10,80", "--share_endpoint", "-o", "out.gv", "in.gv"], "params": {"random_seed": "-5", "lightness": "10,80", "share_endpoint": true, "o": "out.gv", "input": "in.gv"}, "description": "Multi-iteration + LAB lightness + share endpoint"},
+        {"id": 4, "command": ["edgepaint", "--color_scheme=accent7", "--angle=5", "--accuracy=0.1", "--random_seed=42", "-o", "out.gv", "in.gv"], "params": {"color_scheme": "accent7", "angle": "5", "accuracy": "0.1", "random_seed": "42", "o": "out.gv", "input": "in.gv"}, "description": "Brewer color scheme with narrow angle threshold"}
+      ]
+    },
+    {
+      "name": "gvmap",
+      "entry_file": "cmd/gvmap/gvmap.c",
+      "description": "Creates a geographical map highlighting clusters",
+      "language": "C",
+      "arg_parsing": "getopt() in init() at line 168, optstring: \":evODQko:m:s:r:p:c:C:l:b:g:t:a:h:z:d:?\"",
+      "parameters": [
+        {"flag": "-a k", "type": "arg", "description": "Average artificial points added (-1 for auto)"},
+        {"flag": "-b v", "type": "arg", "description": "Polygon line width (<0 for no line)"},
+        {"flag": "-c k", "type": "arg", "description": "Color scheme (0-10 or named scheme string)"},
+        {"flag": "-c_opacity=xx", "type": "arg", "description": "2-char hex opacity for polygons"},
+        {"flag": "-C k", "type": "arg", "description": "Max number of clusters (0=no limit)"},
+        {"flag": "-d s", "type": "arg", "description": "Seed for Fiedler vector calculation"},
+        {"flag": "-D", "type": "flag", "description": "Use top-level cluster subgraphs"},
+        {"flag": "-e", "type": "flag", "description": "Show edges"},
+        {"flag": "-g c", "type": "arg", "description": "Bounding box color"},
+        {"flag": "-h k", "type": "arg", "description": "Artificial points for bridge maintenance"},
+        {"flag": "-highlight=k", "type": "arg", "description": "Only draw cluster k"},
+        {"flag": "-k", "type": "flag", "description": "Increase randomness of boundary"},
+        {"flag": "-l s", "type": "arg", "description": "Specify label"},
+        {"flag": "-m v", "type": "arg", "description": "Bounding box margin"},
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"},
+        {"flag": "-O", "type": "flag", "description": "Don't optimize color assignment"},
+        {"flag": "-p k", "type": "arg", "description": "Ignored (deprecated)"},
+        {"flag": "-Q", "type": "flag", "description": "Use clustering quality method"},
+        {"flag": "-r k", "type": "arg", "description": "Random points for sea/lake boundaries"},
+        {"flag": "-s v", "type": "arg", "description": "Sea/lake shore depth (points)"},
+        {"flag": "-t n", "type": "arg", "description": "Improve contiguity n times"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-z c", "type": "arg", "description": "Polygon line color"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gvmap", "-o", "out.gv", "in.gv"], "params": {"o": "out.gv", "input": "in.gv"}, "description": "Basic map generation"},
+        {"id": 2, "command": ["gvmap", "-c1", "-C50", "-D", "-e", "-v", "-o", "out.gv", "in.gv"], "params": {"c": "1", "C": "50", "D": true, "e": true, "v": true, "o": "out.gv", "input": "in.gv"}, "description": "Pastel map with cluster subgraphs, edges, verbose"},
+        {"id": 3, "command": ["gvmap", "-c_opacity=aa", "-b1.5", "-z#ff0000", "-r100", "-s5", "-t3", "-o", "out.gv", "in.gv"], "params": {"c_opacity": "aa", "b": "1.5", "z": "#ff0000", "r": "100", "s": "5", "t": "3", "o": "out.gv", "input": "in.gv"}, "description": "Full custom style: opacity, line width, shore depth, contiguity"},
+        {"id": 4, "command": ["gvmap", "-c7", "-O", "-k", "-h5", "-a-1", "-d42", "-o", "out.gv", "in.gv"], "params": {"c": "7", "O": true, "k": true, "h": "5", "a": "-1", "d": "42", "o": "out.gv", "input": "in.gv"}, "description": "Adam scheme, no color optimization, random boundaries"}
+      ]
+    },
+    {
+      "name": "cluster",
+      "entry_file": "cmd/gvmap/cluster.c",
+      "description": "Graph clustering tool using modularity or modularity quality",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring: \":vC:c:o:?\"",
+      "parameters": [
+        {"flag": "-C k", "type": "arg", "description": "Max clusters (0=no limit)"},
+        {"flag": "-c k", "type": "arg", "description": "Clustering method (0=modularity, 1=quality)"},
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["cluster", "-o", "out.gv", "in.gv"], "params": {"o": "out.gv", "input": "in.gv"}, "description": "Basic clustering (modularity)"},
+        {"id": 2, "command": ["cluster", "-c1", "-C50", "-v", "-o", "out.gv", "in.gv"], "params": {"c": "1", "C": "50", "v": true, "o": "out.gv", "input": "in.gv"}, "description": "Quality method with cluster limit"}
+      ]
+    },
+    {
+      "name": "gvpr",
+      "entry_file": "cmd/gvpr/gvprmain.c (lib/gvpr/gvpr.c)",
+      "description": "Graph pattern scanning and processing language",
+      "language": "C",
+      "arg_parsing": "Manual arg parsing via doFlags() in lib/gvpr/gvpr.c (line 320)",
+      "parameters": [
+        {"flag": "-c", "type": "flag", "description": "Use source graph for output"},
+        {"flag": "-C", "type": "flag", "description": "Output + clone source graphs"},
+        {"flag": "-f <prog>", "type": "arg", "description": "Read gvpr program from file"},
+        {"flag": "-i", "type": "flag", "description": "Create node-induced subgraph"},
+        {"flag": "-n", "type": "flag", "description": "No read-ahead of input graphs"},
+        {"flag": "-a <args>", "type": "arg", "description": "String arguments for ARGV"},
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"},
+        {"flag": "-q", "type": "flag", "description": "Quiet (no warning messages)"},
+        {"flag": "-v", "type": "flag", "description": "Verbose messages"},
+        {"flag": "-V", "type": "flag", "description": "Print version"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"},
+        {"flag": "<program>", "type": "positional", "description": "gvpr program (inline string) or input files"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gvpr", "-f", "prog.g", "in.gv"], "params": {"f": "prog.g", "input": "in.gv"}, "description": "Run gvpr program from file"},
+        {"id": 2, "command": ["gvpr", "-c", "-v", "-o", "out.gv", "in.gv"], "params": {"c": true, "v": true, "o": "out.gv", "input": "in.gv"}, "description": "Pass-through with clone output and verbose"},
+        {"id": 3, "command": ["gvpr", "-i", "-n", "-q", "N[degree>0]", "in.gv"], "params": {"i": true, "n": true, "q": true, "program": "N[degree>0]", "input": "in.gv"}, "description": "Node-induced subgraph, no readahead, quiet"},
+        {"id": 4, "command": ["gvpr", "-C", "-a", "arg1,arg2", "-f", "prog.g", "-o", "out.gv", "in.gv"], "params": {"C": true, "a": "arg1,arg2", "f": "prog.g", "o": "out.gv", "input": "in.gv"}, "description": "Clone mode with arguments and output file"}
+      ]
+    },
+    {
+      "name": "mingle",
+      "entry_file": "cmd/mingle/minglemain.cpp",
+      "description": "Fast edge bundling for graph visualization",
+      "language": "C++",
+      "arg_parsing": "getopt() in init(), optstring: \":a:c:i:k:K:m:o:p:r:T:v:?\"",
+      "parameters": [
+        {"flag": "-a t", "type": "arg", "description": "Max turning angle [0-180] (default 40)"},
+        {"flag": "-c i", "type": "arg", "description": "Compatibility measure (0=distance, 1=full)"},
+        {"flag": "-i iter", "type": "arg", "description": "Number of outer iterations (default 4)"},
+        {"flag": "-k k", "type": "arg", "description": "Nearest neighbor count (default 10)"},
+        {"flag": "-K k", "type": "arg", "description": "Force constant"},
+        {"flag": "-m method", "type": "arg", "description": "Method: 0=force, 1=agglomerative(ink), 2=cluster+ink"},
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"},
+        {"flag": "-p t", "type": "arg", "description": "Balance for sharp angles"},
+        {"flag": "-r R", "type": "arg", "description": "Max recursion for agglomerative (default 100)"},
+        {"flag": "-T fmt", "type": "arg", "description": "Output format: gv or simple"},
+        {"flag": "-v [n]", "type": "opt_arg", "description": "Verbose level"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["mingle", "-o", "out.gv", "in.gv"], "params": {"o": "out.gv", "input": "in.gv"}, "description": "Basic edge bundling"},
+        {"id": 2, "command": ["mingle", "-a90", "-c0", "-i10", "-k20", "-m2", "-r200", "-Tsimple", "-v", "-o", "out.gv", "in.gv"], "params": {"a": "90", "c": "0", "i": "10", "k": "20", "m": "2", "r": "200", "T": "simple", "v": true, "o": "out.gv", "input": "in.gv"}, "description": "Full edge bundling pipeline"},
+        {"id": 3, "command": ["mingle", "-K0.5", "-p0.8", "-m0", "-o", "out.gv", "in.gv"], "params": {"K": "0.5", "p": "0.8", "m": "0", "o": "out.gv", "input": "in.gv"}, "description": "Force-directed method with custom force constant"}
+      ]
+    },
+    {
+      "name": "gvpack",
+      "entry_file": "cmd/tools/gvpack.cpp",
+      "description": "Merge and pack disjoint graphs from multiple files",
+      "language": "C++",
+      "arg_parsing": "getopt() in init(), optstring: \":na:gvum:s:o:G:?\"",
+      "parameters": [
+        {"flag": "-n", "type": "flag", "description": "Node granularity packing"},
+        {"flag": "-g", "type": "flag", "description": "Graph granularity packing"},
+        {"flag": "-array[_rc][n]", "type": "arg", "description": "Pack as array of graphs (r=rows, c=cols, n=neat)"},
+        {"flag": "-G<n>=<v>", "type": "arg", "description": "Attach attribute to output graph"},
+        {"flag": "-m<n>", "type": "arg", "description": "Margin in points"},
+        {"flag": "-s<gname>", "type": "arg", "description": "Name for root graph"},
+        {"flag": "-o<outfile>", "type": "arg", "description": "Output file"},
+        {"flag": "-u", "type": "flag", "description": "No packing, just combine"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gvpack", "-o", "out.gv", "in1.gv", "in2.gv"], "params": {"o": "out.gv", "files": ["in1.gv", "in2.gv"]}, "description": "Basic merging with default packing"},
+        {"id": 2, "command": ["gvpack", "-array", "-m10", "-Grankdir=LR", "-v", "-o", "out.gv", "in1.gv", "in2.gv", "in3.gv"], "params": {"array": true, "m": "10", "G": "rankdir=LR", "v": true, "o": "out.gv", "files": ["in1.gv", "in2.gv", "in3.gv"]}, "description": "Array packing with margin and graph attribute"},
+        {"id": 3, "command": ["gvpack", "-u", "-sMyGraph", "-o", "out.gv", "in1.gv", "in2.gv"], "params": {"u": true, "s": "MyGraph", "o": "out.gv", "files": ["in1.gv", "in2.gv"]}, "description": "No packing, just combine graphs"}
+      ]
+    },
+    {
+      "name": "gvgen",
+      "entry_file": "cmd/tools/gvgen.c",
+      "description": "Generate various types of graphs (grid, circle, tree, etc.)",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring: \":i:M:m:n:N:c:C:dg:G:h:k:b:B:o:p:r:R:s:S:X:t:T:u:vw:\"",
+      "parameters": [
+        {"flag": "-c<n>", "type": "arg", "description": "Cycle graph"},
+        {"flag": "-C<x,y>", "type": "arg", "description": "Cylinder graph"},
+        {"flag": "-g[f]<h,w>", "type": "arg", "description": "Grid (f=folded)"},
+        {"flag": "-G[f]<h,w>", "type": "arg", "description": "Partial grid (f=folded)"},
+        {"flag": "-h<x>", "type": "arg", "description": "Hypercube of dimension x"},
+        {"flag": "-k<x>", "type": "arg", "description": "Complete graph K_x"},
+        {"flag": "-b<x,y>", "type": "arg", "description": "Complete bipartite K_x,y"},
+        {"flag": "-B<x,y>", "type": "arg", "description": "Ball graph"},
+        {"flag": "-i<n>", "type": "arg", "description": "Generate n random trees"},
+        {"flag": "-m<x>", "type": "arg", "description": "Triangular mesh"},
+        {"flag": "-M<x,y>", "type": "arg", "description": "Moebius strip"},
+        {"flag": "-n<prefix>", "type": "arg", "description": "Node name prefix"},
+        {"flag": "-N<name>", "type": "arg", "description": "Graph name"},
+        {"flag": "-o<file>", "type": "arg", "description": "Output file"},
+        {"flag": "-p<x>", "type": "arg", "description": "Path graph"},
+        {"flag": "-r<x>,<n>", "type": "arg", "description": "Random graph"},
+        {"flag": "-R<n>", "type": "arg", "description": "Random rooted tree"},
+        {"flag": "-s<x>", "type": "arg", "description": "Star graph"},
+        {"flag": "-S<x>", "type": "arg", "description": "2D Sierpinski graph"},
+        {"flag": "-S<x>,<d>", "type": "arg", "description": "dD Sierpinski (d=2,3)"},
+        {"flag": "-t<x>", "type": "arg", "description": "Binary tree"},
+        {"flag": "-t<x>,<n>", "type": "arg", "description": "N-ary tree"},
+        {"flag": "-T<x,y>", "type": "arg", "description": "Torus"},
+        {"flag": "-T<x,y,t1,t2>", "type": "arg", "description": "Twisted torus"},
+        {"flag": "-u<seed>", "type": "arg", "description": "Random seed"},
+        {"flag": "-w<x>", "type": "arg", "description": "Wheel graph"},
+        {"flag": "-d", "type": "flag", "description": "Directed graph"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gvgen", "-k10", "-o", "out.gv"], "params": {"k": "10", "o": "out.gv"}, "description": "Complete graph K_10"},
+        {"id": 2, "command": ["gvgen", "-t5,3", "-d", "-v", "-o", "out.gv"], "params": {"t": "5,3", "d": true, "v": true, "o": "out.gv"}, "description": "Directed 3-ary tree of depth 5"},
+        {"id": 3, "command": ["gvgen", "-g10,10", "-nNode", "-NMyGraph", "-o", "out.gv"], "params": {"g": "10,10", "n": "Node", "N": "MyGraph", "o": "out.gv"}, "description": "10x10 grid with custom prefix"},
+        {"id": 4, "command": ["gvgen", "-h4", "-d", "-o", "out.gv"], "params": {"h": "4", "d": true, "o": "out.gv"}, "description": "4D hypercube directed"},
+        {"id": 5, "command": ["gvgen", "-S5,3", "-o", "out.gv"], "params": {"S": "5,3", "o": "out.gv"}, "description": "3D Sierpinski graph"}
+      ]
+    },
+    {
+      "name": "acyclic",
+      "entry_file": "cmd/tools/acyclic.c",
+      "description": "Make directed graph acyclic by reversing edges",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring: \":vno:\"",
+      "parameters": [
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"},
+        {"flag": "-n", "type": "flag", "description": "Do not output graph"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["acyclic", "-o", "out.gv", "in.gv"], "params": {"o": "out.gv", "input": "in.gv"}, "description": "Basic acyclic transformation"},
+        {"id": 2, "command": ["acyclic", "-n", "-v", "in.gv"], "params": {"n": true, "v": true, "input": "in.gv"}, "description": "Check only, verbose (no output)"}
+      ]
+    },
+    {
+      "name": "nop",
+      "entry_file": "cmd/tools/nop.c",
+      "description": "Pretty-print graph file (pass-through filter)",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring: \"p?\"",
+      "parameters": [
+        {"flag": "-p", "type": "flag", "description": "Check for valid DOT only"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["nop", "in.gv"], "params": {"input": "in.gv"}, "description": "Pretty-print graph"},
+        {"id": 2, "command": ["nop", "-p", "in.gv"], "params": {"p": true, "input": "in.gv"}, "description": "Validate graph only"}
+      ]
+    },
+    {
+      "name": "gvcolor",
+      "entry_file": "cmd/tools/gvcolor.c",
+      "description": "Flow colors through a ranked digraph",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring: \":?\"",
+      "parameters": [
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gvcolor", "in.gv"], "params": {"input": "in.gv"}, "description": "Color flow through ranked graph"}
+      ]
+    },
+    {
+      "name": "tred",
+      "entry_file": "cmd/tools/tred.c",
+      "description": "Transitive reduction filter for directed graphs",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring: \"o:vr?\"",
+      "parameters": [
+        {"flag": "-o FILE", "type": "arg", "description": "Output file"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-r", "type": "flag", "description": "Print removed edges to stderr"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["tred", "-o", "out.gv", "in.gv"], "params": {"o": "out.gv", "input": "in.gv"}, "description": "Basic transitive reduction"},
+        {"id": 2, "command": ["tred", "-v", "-r", "in.gv"], "params": {"v": true, "r": true, "input": "in.gv"}, "description": "Verbose with removed edges list"}
+      ]
+    },
+    {
+      "name": "unflatten",
+      "entry_file": "cmd/tools/unflatten.c",
+      "description": "Adjust directed graphs to improve layout aspect ratio",
+      "language": "C",
+      "arg_parsing": "getopt() in scanargs(), optstring: \":fl:c:o:\"",
+      "parameters": [
+        {"flag": "-f", "type": "flag", "description": "Adjust immediate fanout chains"},
+        {"flag": "-l <M>", "type": "arg", "description": "Stagger leaf edge lengths [1,M]"},
+        {"flag": "-c <N>", "type": "arg", "description": "Chain disconnected nodes of length N"},
+        {"flag": "-o <file>", "type": "arg", "description": "Output file"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["unflatten", "-f", "-l3", "-c5", "-o", "out.gv", "in.gv"], "params": {"f": true, "l": "3", "c": "5", "o": "out.gv", "input": "in.gv"}, "description": "Full unflatten with fanout, leaf stagger, chains"}
+      ]
+    },
+    {
+      "name": "gc",
+      "entry_file": "cmd/tools/gc.c",
+      "description": "Count graph components (nodes, edges, clusters, connected components)",
+      "language": "C",
+      "arg_parsing": "getopt() in init(), optstring not in-line but flags via global vars",
+      "parameters": [
+        {"flag": "-n", "type": "flag", "description": "Print node count"},
+        {"flag": "-e", "type": "flag", "description": "Print edge count"},
+        {"flag": "-c", "type": "flag", "description": "Print connected component count"},
+        {"flag": "-C", "type": "flag", "description": "Print cluster count"},
+        {"flag": "-a", "type": "flag", "description": "Print all counts"},
+        {"flag": "-D", "type": "flag", "description": "Only directed graphs"},
+        {"flag": "-U", "type": "flag", "description": "Only undirected graphs"},
+        {"flag": "-r", "type": "flag", "description": "Recursively analyze subgraphs"},
+        {"flag": "-s", "type": "flag", "description": "Silent"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gc", "-a", "-r", "-v", "in.gv"], "params": {"a": true, "r": true, "v": true, "input": "in.gv"}, "description": "Full graph statistics"},
+        {"id": 2, "command": ["gc", "-n", "-e", "in.gv"], "params": {"n": true, "e": true, "input": "in.gv"}, "description": "Count nodes and edges only"}
+      ]
+    },
+    {
+      "name": "ccomps",
+      "entry_file": "cmd/tools/ccomps.c",
+      "description": "Connected components filter for graphs",
+      "language": "C",
+      "parameters": [
+        {"flag": "-x", "type": "flag", "description": "Only print connected components"},
+        {"flag": "-z", "type": "arg", "description": "Sort by size"},
+        {"flag": "-X", "type": "arg", "description": "Extract component by index"},
+        {"flag": "-C", "type": "flag", "description": "Use clusters for component detection"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["ccomps", "-x", "-o", "out.gv", "in.gv"], "params": {"x": true, "o": "out.gv", "input": "in.gv"}, "description": "Extract components"},
+        {"id": 2, "command": ["ccomps", "-C", "-v", "in.gv"], "params": {"C": true, "v": true, "input": "in.gv"}, "description": "Cluster-based components"}
+      ]
+    },
+    {
+      "name": "dijkstra",
+      "entry_file": "cmd/tools/dijkstra.c",
+      "description": "Single-source distance filter",
+      "language": "C",
+      "parameters": [
+        {"flag": "-d", "type": "flag", "description": "Use directed paths"},
+        {"flag": "-p", "type": "flag", "description": "Record shortest paths"},
+        {"flag": "-s", "type": "flag", "description": "Don't set dist for different components"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["dijkstra", "-d", "-p", "source_node", "in.gv"], "params": {"d": true, "p": true, "node": "source_node", "input": "in.gv"}, "description": "Directed shortest path analysis"}
+      ]
+    },
+    {
+      "name": "gml2gv",
+      "entry_file": "cmd/tools/gml2gv.c",
+      "description": "GML to Graphviz converter (also aliased as gv2gml)",
+      "language": "C",
+      "parameters": [
+        {"flag": "-g<name>", "type": "arg", "description": "Graph name template"},
+        {"flag": "-o<file>", "type": "arg", "description": "Output file"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gml2gv", "-gMyGraph", "-o", "out.gv", "in.gml"], "params": {"g": "MyGraph", "o": "out.gv", "input": "in.gml"}, "description": "Convert GML to GV"},
+        {"id": 2, "command": ["gv2gml", "-v", "in.gv"], "params": {"v": true, "input": "in.gv"}, "description": "Convert GV to GML"}
+      ]
+    },
+    {
+      "name": "sccmap",
+      "entry_file": "cmd/tools/sccmap.c",
+      "description": "Extract strongly connected components of directed graphs",
+      "language": "C",
+      "parameters": [
+        {"flag": "-S", "type": "flag", "description": "Do not print SCC map"},
+        {"flag": "-d", "type": "flag", "description": "Print component DAG"},
+        {"flag": "-i", "type": "flag", "description": "Print inverted map"},
+        {"flag": "-o<file>", "type": "arg", "description": "Output file"},
+        {"flag": "-s", "type": "flag", "description": "Silent"},
+        {"flag": "-t", "type": "flag", "description": "Print tree"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-?", "type": "flag", "description": "Print usage"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["sccmap", "-S", "-d", "-v", "-o", "out.gv", "in.gv"], "params": {"S": true, "d": true, "v": true, "o": "out.gv", "input": "in.gv"}, "description": "SCC extraction with component DAG"}
+      ]
+    },
+    {
+      "name": "bcomps",
+      "entry_file": "cmd/tools/bcomps.c",
+      "description": "Biconnected components filter for graphs",
+      "language": "C",
+      "parameters": [
+        {"flag": "-v", "type": "flag", "description": "Verbose"},
+        {"flag": "-s", "type": "flag", "description": "Silent"},
+        {"flag": "-x", "type": "flag", "description": "Emit blocks as root graphs"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["bcomps", "-v", "-x", "-o", "out.gv", "in.gv"], "params": {"v": true, "x": true, "o": "out.gv", "input": "in.gv"}, "description": "Biconnected components extraction"}
+      ]
+    },
+    {
+      "name": "graphml2gv",
+      "entry_file": "cmd/tools/graphml2gv.c",
+      "description": "GraphML to Graphviz converter (requires EXPAT)",
+      "language": "C",
+      "parameters": [
+        {"flag": "-o<file>", "type": "arg", "description": "Output file"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["graphml2gv", "-o", "out.gv", "in.graphml"], "params": {"o": "out.gv", "input": "in.graphml"}, "description": "Convert GraphML to GV"}
+      ]
+    },
+    {
+      "name": "gxl2gv",
+      "entry_file": "cmd/tools/gxl2gv.c",
+      "description": "GXL to Graphviz converter (also aliased as dot2gxl, gv2gxl, gxl2dot)",
+      "language": "C",
+      "parameters": [
+        {"flag": "-o<file>", "type": "arg", "description": "Output file"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["gxl2gv", "-o", "out.gv", "in.gxl"], "params": {"o": "out.gv", "input": "in.gxl"}, "description": "Convert GXL to GV"}
+      ]
+    },
+    {
+      "name": "mm2gv",
+      "entry_file": "cmd/tools/mm2gv.c",
+      "description": "Matrix Market to Graphviz converter",
+      "language": "C",
+      "combinations": [
+        {"id": 1, "command": ["mm2gv", "-o", "out.gv", "in.mtx"], "params": {"o": "out.gv", "input": "in.mtx"}, "description": "Convert Matrix Market to GV"}
+      ]
+    },
+    {
+      "name": "prune",
+      "entry_file": "contrib/prune/prune.c",
+      "description": "Prune graph nodes (remove subtrees attached to specified nodes)",
+      "language": "C",
+      "arg_parsing": "getopt() in main(), optstring: \"hvn:N:\"",
+      "parameters": [
+        {"flag": "-N <attr>=<val>", "type": "arg", "description": "Node attribute specification"},
+        {"flag": "-n <node>", "type": "arg", "description": "Node to prune"},
+        {"flag": "-h", "type": "flag", "description": "Print help"},
+        {"flag": "-v", "type": "flag", "description": "Verbose"}
+      ],
+      "combinations": [
+        {"id": 1, "command": ["prune", "-n", "node1", "in.gv"], "params": {"n": "node1", "input": "in.gv"}, "description": "Prune subtrees attached to node1"}
+      ]
+    }
+  ]
+}

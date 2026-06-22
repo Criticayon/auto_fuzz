@@ -1,0 +1,46 @@
+{
+  "name": "vulnerability-discovery-pipeline",
+  "version": "1.0.0",
+  "description": "Automated vulnerability discovery pipeline for CLI programs: program analysis → AFL++ fuzzing → GitHub Issue generation",
+  "author": "Claude Code",
+  "license": "Apache-2.0",
+  "skills": [
+    {
+      "id": "program-analysis",
+      "file": "program-analysis.md",
+      "version": "1.0",
+      "description": "Analyze CLI program structure, enumerate command combinations, trace call chains, score vulnerability paths"
+    },
+    {
+      "id": "auto-fuzz",
+      "file": "auto-fuzz.md",
+      "version": "2.0",
+      "description": "Automated AFL++ fuzzing: compile, strategy design, parallel campaigns, crash triage, ASAN reports",
+      "depends_on": ["program-analysis"]
+    },
+    {
+      "id": "issue-generator",
+      "file": "issue-generator.md",
+      "version": "1.0",
+      "description": "Generate GitHub Issue reports from fuzzing results: CWE mapping, root cause analysis, formatted markdown",
+      "depends_on": ["auto-fuzz"]
+    }
+  ],
+  "artifacts": {
+    "program-analysis": [
+      "command_combinations.json",
+      "vulnerability_path_scores.md",
+      "call_tree.md",
+      "coverage_summary.md"
+    ],
+    "auto-fuzz": [
+      "reports/SUMMARY.md",
+      "reports/<crash_asan_reports>.md",
+      "target_metadata.sh"
+    ],
+    "issue-generator": [
+      "issues/SUMMARY.md",
+      "issues/issue_<crash_name>.md"
+    ]
+  }
+}

@@ -1,0 +1,69 @@
+## gml2gv（32 crashes → 1 个漏洞）
+
+### 漏洞 A-1：GML 输出 `strlen(NULL)`
+
+| 字段 | 值 |
+|------|-----|
+| **位置** | `write.c:230` — `_write_canonstr()` → `agstrcanon_bytes()` |
+| **ASAN** | SEGV (null pointer dereference) |
+| **实例** | 32 |
+
+**根因：** 写图输出时 `write_node()` 调用 `_write_canonstr()` 写入节点属性，属性值为 NULL 时触发 `strlen(NULL)`。
+
+**复现：**
+```bash
+./build_asan_fixed/cmd/tools/gml2gv -o /dev/null out_gml2gv/default/crashes/id:000000,sig:11,src:000000,time:9280,execs:30854,op:havoc,rep:3
+```
+
+---
+
+## graphml2gv（66 crashes → 3 个漏洞）
+
+### 漏洞 B-1：XML 解析断言失败
+
+| 字段 | 值 |
+|------|-----|
+| **位置** | `attr.c:503` — `agxset_()` assert |
+| **ASAN** | SIGABRT (assertion failure) |
+| **实例** | 42 |
+
+**根因：** `sym->id >= 0 && sym->id < topdictsize(obj)` 失败。XML 解析中设置了越界的属性符号 ID。
+
+**复现：**
+```bash
+./build_asan_fixed/cmd/tools/graphml2gv -o /dev/null out_graphml2gv/default/crashes/id:000000,sig:06,src:000580,time:696352,execs:1016406,op:havoc,rep:4
+```
+
+---
+
+### 漏洞 B-2：XML 解析 graph 空指针
+
+| 字段 | 值 |
+|------|-----|
+| **位置** | `id.c:109` — `agmapnametoid(NULL)` |
+| **ASAN** | SEGV (null pointer dereference) |
+| **实例** | 20 |
+
+**根因：** `endElementHandler()` 中 graph 指针为 NULL 时调用 `agnode()` → `agmapnametoid()`。
+
+**复现：**
+```bash
+./build_asan_fixed/cmd/tools/graphml2gv -o /dev/null out_graphml2gv/default/crashes/id:000001,sig:11,src:000493,time:698995,execs:1019257,op:havoc,rep:7
+```
+
+---
+
+### 漏洞 B-3：XML 解析内部 map 空指针
+
+| 字段 | 值 |
+|------|-----|
+| **位置** | `imap.c:91` — `aginternalmaplookup(NULL)` |
+| **ASAN** | SEGV (null pointer dereference) |
+| **实例** | 4 |
+
+**根因：** 内部 map 为 NULL 时执行 map 查找操作。
+
+**复现：**
+```bash
+./build_asan_fixed/cmd/tools/graphml2gv -o /dev/null out_graphml2gv/default/crashes/id:000022,sig:11,src:000833,time:2026020,execs:1709974,op:havoc,rep:2
+```

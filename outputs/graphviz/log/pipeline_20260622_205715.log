@@ -1,0 +1,97 @@
+2026-06-22 20:57:15 [INFO] Pipeline started
+2026-06-22 20:57:15 [INFO]   target:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\graphviz
+2026-06-22 20:57:15 [INFO]   output:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz
+2026-06-22 20:57:15 [INFO]   log:      E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\log\pipeline_20260622_205715.log
+2026-06-22 20:57:15 [INFO] >>> Phase 3: Connecting to AFL++ container...
+2026-06-22 20:57:15 [INFO] [container] connecting...
+2026-06-22 20:57:16 [INFO] [container] name=afl  exists=True  running=True  status=running
+2026-06-22 20:57:16 [INFO] [container] 已就绪
+2026-06-22 20:57:16 [INFO] AFL++ in container: /usr/local/bin/afl-fuzz
+afl-fuzz++4.41a
+2026-06-22 20:57:16 [INFO] [container] afl-fuzz 可用
+2026-06-22 20:57:16 [INFO] [transfer] copying filtered manifest to container
+2026-06-22 20:57:16 [INFO] >>> Starting Phase 3: Execute Fuzz
+2026-06-22 20:57:16 [INFO] 
+2026-06-22 20:57:16 [INFO] ============================================================
+2026-06-22 20:57:16 [INFO]   Phase 3 — Running...
+2026-06-22 20:57:16 [INFO] ============================================================
+2026-06-22 20:57:17 [INFO] [Phase 3] session started
+2026-06-22 20:57:22 [INFO] [Phase 3] Let me start by examining the workspace and understanding what's already there.
+2026-06-22 20:57:25 [INFO] [Phase 3] Good, I can see the workspace is already set up. Let me read the key files.
+2026-06-22 20:57:28 [INFO] [Phase 3] Let me check the full manifest and the current state of any running fuzz processes.
+2026-06-22 20:57:43 [INFO] [Phase 3] I see that 4 strategies are already running from what seems like a prior session, and 3 more are not. The `fuzz_manifest_selected.json` is empty. Let me check the existing output directories more carefully.
+2026-06-22 20:58:04 [INFO] [Phase 3] The 4 running strategies look healthy. Now I see the issue: `fuzz_manifest_selected.json` is empty but there are 7 total strategies in the full manifest. Let me populate the selected manifest from the full one, then launch the remaining 3 strategies (gvmap, edgepaint, dot_cmplog). Let me first verify the binaries exist.
+2026-06-22 20:58:09 [INFO] [Phase 3] All binaries and seeds confirmed. Now let me populate the selected manifest with all strategies and launch the missing ones. Let me also create the output directories for the new strategies.
+2026-06-22 20:58:17 [INFO] [Phase 3] Now let me create the output directories and launch the 3 missing strategies (gvmap, edgepaint, dot_cmplog).
+2026-06-22 20:58:24 [INFO] [Phase 3] All 3 launched. Let me wait a moment and verify all 7 strategies are running stably.
+2026-06-22 20:58:34 [INFO] [Phase 3] All 7 strategies confirmed running. Now let me create the signal files and output [FUZZ_STARTED].
+2026-06-22 20:58:41 [INFO] [Phase 3] Both signal files created. Let me provide the summary.
+
+---
+
+## [FUZZ_STARTED]
+
+**Project:** Graphviz (`/workspace/graphviz`)
+**Workspace:** `/workspace/fuzz_graphviz`
+**Version:** 8afd59c
+**Date:** 2026-06-22
+
+### All 7 Strategies Launched Successfully
+
+| # | Strategy | Tool | Schedule | Output Dir | Status | Since |
+|---|----------|------|----------|-----------|--------|-------|
+| 1 | `dot_xdot_fdp_flags` | dot | explore | `out_dot_xdot` | ✅ Running | 11:16 |
+| 2 | `dot_svg_graph_attrs` | dot 
+2026-06-22 20:58:41 [INFO] [Phase 3] Both signal files created. Let me provide the summary.
+
+---
+
+## [FUZZ_STARTED]
+
+**Project:** Graphviz (`/workspace/graphviz`)
+**Workspace:** `/workspace/fuzz_graphviz`
+**Version:** 8afd59c
+**Date:** 2026-06-22
+
+### All 7 Strategies Launched Successfully
+
+| # | Strategy | Tool | Schedule | Output Dir | Status | Since |
+|---|----------|------|----------|-----------|--------|-------|
+| 1 | `dot_xdot_fdp_flags` | dot | explore | `out_dot_xdot` | ✅ Running | 11:16 |
+| 2 | `dot_svg_graph_attrs` | dot 
+2026-06-22 20:58:41 [INFO] [Phase 3] agent completed
+2026-06-22 20:58:41 [INFO] 
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO]   Phase 3 — Complete (4085 messages, 85.4s)
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_started.signal (0.0 KB)
+2026-06-22 20:58:41 [INFO] [transfer] retrieving fuzz results from container...
+2026-06-22 20:58:41 [INFO] [container] connecting...
+2026-06-22 20:58:41 [INFO] [container] name=afl  exists=True  running=True  status=running
+2026-06-22 20:58:41 [INFO] [container] 已就绪
+2026-06-22 20:58:41 [INFO] AFL++ in container: /usr/local/bin/afl-fuzz
+afl-fuzz++4.41a
+2026-06-22 20:58:41 [INFO] [container] afl-fuzz 可用
+2026-06-22 20:58:41 [INFO] [transfer] fuzz_started.signal retrieved
+2026-06-22 20:58:41 [INFO] 
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO]   Pipeline Complete! (total 86.0s)
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO] 
+2026-06-22 20:58:41 [INFO] Artifacts:
+2026-06-22 20:58:41 [INFO]   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz/
+2026-06-22 20:58:41 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\command_combinations.json (33.2 KB)
+2026-06-22 20:58:41 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\call_tree.md (19.6 KB)
+2026-06-22 20:58:41 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\coverage_summary.md (7.3 KB)
+2026-06-22 20:58:41 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\vulnerability_path_scores.md (14.9 KB)
+2026-06-22 20:58:41 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_manifest.json (4.7 KB)
+2026-06-22 20:58:41 [WARNING]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\issues\SUMMARY.md (NOT YET CREATED)
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO]   Pipeline State Check
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO]   [OK] COMPLETE Phase 1: Program Analysis
+2026-06-22 20:58:41 [INFO]   [OK] COMPLETE Phase 2: Preprocess
+2026-06-22 20:58:41 [INFO]   [OK] COMPLETE Phase 3: Execute Fuzz
+2026-06-22 20:58:41 [INFO]   [..] PENDING Phase 4: Issue Generator
+2026-06-22 20:58:41 [INFO] ============================================================
+2026-06-22 20:58:41 [INFO] Pipeline finished

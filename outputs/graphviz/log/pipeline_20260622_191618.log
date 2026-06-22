@@ -1,0 +1,88 @@
+2026-06-22 19:16:18 [INFO] Pipeline started
+2026-06-22 19:16:18 [INFO]   target:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\graphviz
+2026-06-22 19:16:18 [INFO]   output:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz
+2026-06-22 19:16:18 [INFO]   log:      E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\log\pipeline_20260622_191618.log
+2026-06-22 19:16:18 [INFO] >>> Phase 3: Connecting to AFL++ container...
+2026-06-22 19:16:18 [INFO] [container] connecting...
+2026-06-22 19:16:18 [INFO] [container] name=afl  exists=True  running=True  status=running
+2026-06-22 19:16:19 [INFO] [container] 已就绪
+2026-06-22 19:16:19 [INFO] AFL++ in container: /usr/local/bin/afl-fuzz
+afl-fuzz++4.41a
+2026-06-22 19:16:19 [INFO] [container] afl-fuzz 可用
+2026-06-22 19:16:19 [INFO] [transfer] copying filtered manifest to container
+2026-06-22 19:16:19 [INFO] >>> Starting Phase 3: Execute Fuzz
+2026-06-22 19:16:19 [INFO] 
+2026-06-22 19:16:19 [INFO] ============================================================
+2026-06-22 19:16:19 [INFO]   Phase 3 — Running...
+2026-06-22 19:16:19 [INFO] ============================================================
+2026-06-22 19:16:20 [INFO] [Phase 3] session started
+2026-06-22 19:16:40 [INFO] [Phase 3] All binaries exist, seeds are ready (405 seeds), and no old output directories. Now I'll source the metadata and launch all 4 strategies simultaneously.
+2026-06-22 19:16:48 [INFO] [Phase 3] Now launching all 4 strategies simultaneously via `container_exec_detached`:
+2026-06-22 19:16:53 [INFO] [Phase 3] All 4 launched. Let me wait a moment for them to initialize, then verify they're running.
+2026-06-22 19:16:58 [INFO] [Phase 3] All 4 strategies are confirmed running. Now creating the signal files.
+2026-06-22 19:17:07 [INFO] [Phase 3] All 4 strategies are running successfully. Here's the full status:
+
+---
+
+## ✅ Fuzzing Campaign Started
+
+| Strategy | Tool | Schedule | PID | Status |
+|----------|------|----------|-----|--------|
+| `dot_xdot_fdp_flags` | dot | explore | 46212 | ✅ Running |
+| `dot_svg_graph_attrs` | dot | rare | 46367 | ✅ Running |
+| `gvpr_graph_input` | gvpr | fast | 46530 | ✅ Running |
+| `gvpack_array_pack` | gvpack | explore | 47097 | ✅ Running |
+
+**Signal files created:**
+- `/workspace/fuzz_graphviz/fuzz_star
+2026-06-22 19:17:07 [INFO] [Phase 3] All 4 strategies are running successfully. Here's the full status:
+
+---
+
+## ✅ Fuzzing Campaign Started
+
+| Strategy | Tool | Schedule | PID | Status |
+|----------|------|----------|-----|--------|
+| `dot_xdot_fdp_flags` | dot | explore | 46212 | ✅ Running |
+| `dot_svg_graph_attrs` | dot | rare | 46367 | ✅ Running |
+| `gvpr_graph_input` | gvpr | fast | 46530 | ✅ Running |
+| `gvpack_array_pack` | gvpack | explore | 47097 | ✅ Running |
+
+**Signal files created:**
+- `/workspace/fuzz_graphviz/fuzz_star
+2026-06-22 19:17:07 [INFO] [Phase 3] agent completed
+2026-06-22 19:17:08 [INFO] 
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO]   Phase 3 — Complete (1978 messages, 49.0s)
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_started.signal (0.0 KB)
+2026-06-22 19:17:08 [INFO] [transfer] retrieving fuzz results from container...
+2026-06-22 19:17:08 [INFO] [container] connecting...
+2026-06-22 19:17:08 [INFO] [container] name=afl  exists=True  running=True  status=running
+2026-06-22 19:17:08 [INFO] [container] 已就绪
+2026-06-22 19:17:08 [INFO] AFL++ in container: /usr/local/bin/afl-fuzz
+afl-fuzz++4.41a
+2026-06-22 19:17:08 [INFO] [container] afl-fuzz 可用
+2026-06-22 19:17:08 [INFO] [transfer] fuzz_started.signal retrieved
+2026-06-22 19:17:08 [INFO] 
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO]   Pipeline Complete! (total 49.4s)
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO] 
+2026-06-22 19:17:08 [INFO] Artifacts:
+2026-06-22 19:17:08 [INFO]   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz/
+2026-06-22 19:17:08 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\command_combinations.json (33.2 KB)
+2026-06-22 19:17:08 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\call_tree.md (19.6 KB)
+2026-06-22 19:17:08 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\coverage_summary.md (7.3 KB)
+2026-06-22 19:17:08 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\vulnerability_path_scores.md (14.9 KB)
+2026-06-22 19:17:08 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_manifest.json (4.7 KB)
+2026-06-22 19:17:08 [WARNING]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\issues\SUMMARY.md (NOT YET CREATED)
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO]   Pipeline State Check
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO]   [OK] COMPLETE Phase 1: Program Analysis
+2026-06-22 19:17:08 [INFO]   [OK] COMPLETE Phase 2: Preprocess
+2026-06-22 19:17:08 [INFO]   [OK] COMPLETE Phase 3: Execute Fuzz
+2026-06-22 19:17:08 [INFO]   [..] PENDING Phase 4: Issue Generator
+2026-06-22 19:17:08 [INFO] ============================================================
+2026-06-22 19:17:08 [INFO] Pipeline finished

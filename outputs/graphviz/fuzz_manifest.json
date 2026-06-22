@@ -1,0 +1,96 @@
+{
+  "project": "graphviz",
+  "version": "12.x",
+  "build_type": "afl-clang-lto (non-ASAN), afl-clang-lto CMPLOG",
+  "batch_size": 4,
+  "seeds_dir": "/workspace/fuzz_graphviz/seeds_min",
+  "total_strategies": 7,
+  "strategies": [
+    {
+      "id": 1,
+      "name": "dot_xdot_fdp_flags",
+      "tool": "dot",
+      "vuln_score": 82,
+      "priority": "critical",
+      "desc": "从 analysis Rank 3 映射: dot -Txdot -Kdot -Lg -Lm50 -LT*0.5 — 最高漏洞分数, 覆盖图解析 + FDP 参数解析 (CWE-190) + xdot 渲染",
+      "binary": "/workspace/graphviz/build_afl/cmd/dot/dot",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_dot_xdot -m 4096 -t 10000 -p explore -- /workspace/graphviz/build_afl/cmd/dot/dot -Txdot -Kdot -Lg -Lm50 -LT*0.5 -o /dev/null @@",
+      "schedule": "explore",
+      "output_dir": "out_dot_xdot"
+    },
+    {
+      "id": 2,
+      "name": "dot_svg_graph_attrs",
+      "tool": "dot",
+      "vuln_score": 78,
+      "priority": "critical",
+      "desc": "从 analysis Rank 1 映射: dot -Tsvg -Kdot -Grankdir=LR -v — SVG 渲染 + 图属性解析 (CWE-20/CWE-119)",
+      "binary": "/workspace/graphviz/build_afl/cmd/dot/dot",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_dot_svg -m 4096 -t 10000 -p rare -- /workspace/graphviz/build_afl/cmd/dot/dot -Tsvg -Kdot -Grankdir=LR -v -o /dev/null @@",
+      "schedule": "rare",
+      "output_dir": "out_dot_svg"
+    },
+    {
+      "id": 3,
+      "name": "gvpr_graph_input",
+      "tool": "gvpr",
+      "vuln_score": 65,
+      "priority": "high",
+      "desc": "从 analysis Rank 1 (gvpr) 映射: gvpr 语言解析 + 图文件输入 — gvpr 语言解释器 (CWE-119)",
+      "binary": "/workspace/graphviz/build_afl/cmd/gvpr/gvpr",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_gvpr -m 4096 -t 10000 -p fast -x /workspace/fuzz_graphviz/gvpr.dict -- /workspace/graphviz/build_afl/cmd/gvpr/gvpr -f /workspace/fuzz_graphviz/passthru.g -v -o /dev/null @@",
+      "schedule": "fast",
+      "output_dir": "out_gvpr",
+      "extra_files": ["passthru.g", "gvpr.dict"]
+    },
+    {
+      "id": 4,
+      "name": "gvpack_array_pack",
+      "tool": "gvpack",
+      "vuln_score": 60,
+      "priority": "high",
+      "desc": "从 analysis Rank 1 (gvpack) 映射: gvpack -array -Grankdir=LR — 几何打包计算 (CWE-787) + 图属性解析",
+      "binary": "/workspace/graphviz/build_afl/cmd/tools/gvpack",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_gvpack -m 4096 -t 10000 -p explore -- /workspace/graphviz/build_afl/cmd/tools/gvpack -array -Grankdir=LR -v -o /dev/null @@",
+      "schedule": "explore",
+      "output_dir": "out_gvpack"
+    },
+    {
+      "id": 5,
+      "name": "gvmap_full_flags",
+      "tool": "gvmap",
+      "vuln_score": 55,
+      "priority": "medium",
+      "desc": "从 analysis Rank 1 (gvmap) 映射: gvmap -c1 -C50 -D -e -v — 地图构建 (CWE-787) + sscanf 解析 (CWE-190)",
+      "binary": "/workspace/graphviz/build_afl/cmd/gvmap/gvmap",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_gvmap -m 4096 -t 10000 -p coe -- /workspace/graphviz/build_afl/cmd/gvmap/gvmap -c1 -C50 -D -e -v -o /dev/null @@",
+      "schedule": "coe",
+      "output_dir": "out_gvmap"
+    },
+    {
+      "id": 6,
+      "name": "edgepaint_full_args",
+      "tool": "edgepaint",
+      "vuln_score": 52,
+      "priority": "medium",
+      "desc": "从 analysis Rank 1 (edgepaint) 映射: edgepaint --angle=30 --accuracy=0.001 --color_scheme=rgb -v — 稀疏矩阵操作 (CWE-787) + sscanf (CWE-190)",
+      "binary": "/workspace/graphviz/build_afl/cmd/edgepaint/edgepaint",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_edgepaint -m 4096 -t 10000 -p explore -- /workspace/graphviz/build_afl/cmd/edgepaint/edgepaint --angle=30 --accuracy=0.001 --color_scheme=rgb -v -o /dev/null @@",
+      "schedule": "explore",
+      "output_dir": "out_edgepaint"
+    },
+    {
+      "id": 7,
+      "name": "dot_cmplog_redqueen",
+      "tool": "dot (CMPLOG)",
+      "vuln_score": 78,
+      "priority": "critical",
+      "desc": "CMPLOG/Redqueen 策略: dot -Tsvg -Kdot -v — 通过 magic byte 旁路提升图格式覆盖率",
+      "binary": "/workspace/graphviz/build_afl/cmd/dot/dot",
+      "cmplog_binary": "/workspace/graphviz/build_cmplog/cmd/dot/dot",
+      "command": "afl-fuzz -i /workspace/fuzz_graphviz/seeds_min -o /workspace/fuzz_graphviz/out_dot_cmplog -m 4096 -t 10000 -p explore -c /workspace/graphviz/build_cmplog/cmd/dot/dot -- /workspace/graphviz/build_afl/cmd/dot/dot -Tsvg -Kdot -v -o /dev/null @@",
+      "schedule": "explore",
+      "output_dir": "out_dot_cmplog"
+    }
+  ]
+}

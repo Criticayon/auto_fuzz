@@ -1,0 +1,21 @@
+services:
+  aflplusplus:
+    image: aflplusplus/aflplusplus:latest
+    container_name: afl
+    init: true
+    restart: unless-stopped
+    network_mode: bridge
+    entrypoint: /bin/bash -c "tail -f /dev/null"  # 保持容器运行
+    volumes: []
+    working_dir: /workspace
+    environment:
+      - AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+      - AFL_SKIP_CPUFREQ=1
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    deploy:
+      resources:
+        limits:
+          memory: 16G

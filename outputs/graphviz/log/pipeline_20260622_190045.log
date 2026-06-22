@@ -1,0 +1,93 @@
+2026-06-22 19:00:45 [INFO] Pipeline started
+2026-06-22 19:00:45 [INFO]   target:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\graphviz
+2026-06-22 19:00:45 [INFO]   output:   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz
+2026-06-22 19:00:45 [INFO]   log:      E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\log\pipeline_20260622_190045.log
+2026-06-22 19:00:45 [INFO] >>> Phase 2: Connecting to AFL++ container...
+2026-06-22 19:00:45 [INFO] [container] connecting...
+2026-06-22 19:00:45 [INFO] [container] name=afl  exists=True  running=True  status=running
+2026-06-22 19:00:45 [INFO] [container] 已就绪
+2026-06-22 19:00:45 [INFO] AFL++ in container: /usr/local/bin/afl-fuzz
+afl-fuzz++4.41a
+2026-06-22 19:00:45 [INFO] [container] afl-fuzz 可用
+2026-06-22 19:00:45 [INFO] [container] checking for afl-fuzz processes for 'graphviz'...
+2026-06-22 19:00:45 [INFO] [container] no existing afl-fuzz processes for 'graphviz'
+2026-06-22 19:00:45 [INFO] [transfer] copying analysis files to container: /workspace/fuzz_graphviz
+2026-06-22 19:00:45 [INFO]   => command_combinations.json
+2026-06-22 19:00:45 [INFO]   => call_tree.md
+2026-06-22 19:00:45 [INFO]   => coverage_summary.md
+2026-06-22 19:00:45 [INFO]   => vulnerability_path_scores.md
+2026-06-22 19:00:45 [INFO] >>> Starting Phase 2: Preprocess
+2026-06-22 19:00:45 [INFO] 
+2026-06-22 19:00:45 [INFO] ============================================================
+2026-06-22 19:00:45 [INFO]   Phase 2 — Running...
+2026-06-22 19:00:45 [INFO] ============================================================
+2026-06-22 19:00:46 [INFO] [Phase 2] session started
+2026-06-22 19:00:51 [INFO] [Phase 2] I'll start by exploring the project structure and checking the analysis files already provided.
+2026-06-22 19:00:54 [INFO] [Phase 2] Let me check the project source more thoroughly and read the analysis files.
+2026-06-22 19:01:25 [INFO] [Phase 2] Now let me build graphviz with AFL++ ASAN instrumentation using cmake.
+2026-06-22 19:02:15 [INFO] [Phase 2] The mingle build requires ANN library not available. The core tools are all built. Let me verify the key binaries work and generate the metadata.
+2026-06-22 19:02:20 [INFO] [Phase 2] Let me create the target metadata and find seed corpora.
+2026-06-22 19:03:00 [INFO] [Phase 2] The ASAN shadow memory requires too much virtual address space. Following the skill instructions, I'll rebuild without ASAN.
+2026-06-22 19:03:27 [INFO] [Phase 2] Now let me also build a CMPLOG variant for Redqueen support.
+2026-06-22 19:05:22 [INFO] [Phase 2] OK, `afl-clang-fast` and `afl-clang-lto` in this environment always include ASAN. I need to use `afl-gcc-fast` for a non-ASAN build. Let me rebuild.
+2026-06-22 19:06:36 [INFO] [Phase 2] Found the issue! `AFL_USE_ASAN=1` is still set in the environment. Let me unset it and rebuild properly.
+2026-06-22 19:08:15 [INFO] [Phase 2] The non-ASAN build works perfectly - captured 3531 coverage tuples. Now let me minimize the seed corpus.
+2026-06-22 19:10:00 [INFO] [Phase 2] Minimized to 405 seed files. Now let me create the fuzz manifest with strategies derived from the analysis.
+2026-06-22 19:10:19 [INFO] [Phase 2] Now let me create the fuzz_manifest.json with strategies derived from the analysis.
+2026-06-22 19:10:33 [INFO] [Phase 2] Now let me create the supporting files referenced in the manifest.
+2026-06-22 19:10:46 [INFO] [Phase 2] All tools verified. Now let me update the target_metadata.sh with the correct build paths and save both files to container and host.
+2026-06-22 19:10:50 [INFO] [Phase 2] Now let me save both files to the host workdir as well.
+2026-06-22 19:11:19 [INFO] [Phase 2] All phases complete. Here's the full summary:
+
+---
+
+## ✅ Auto-Fuzz: Graphviz Preparation Complete
+
+### Phase 1: Compile
+| Build Type | Compiler | Status |
+|---|---|---|
+| **Non-ASAN** (afl-clang-lto) | `afl-clang-lto` | ✅ Built to `/workspace/graphviz/build_afl/` |
+| **CMPLOG** (afl-clang-lto) | `afl-clang-lto` w/ `AFL_LLVM_CMPLOG=1` | ✅ Built to `/workspace/graphviz/build_cmplog/` |
+
+**Note:** ASAN was not used — this AFL++ build always enables it in `afl-clang-fast`/`afl-clang-lto`, but the sh
+2026-06-22 19:11:19 [INFO] [Phase 2] All phases complete. Here's the full summary:
+
+---
+
+## ✅ Auto-Fuzz: Graphviz Preparation Complete
+
+### Phase 1: Compile
+| Build Type | Compiler | Status |
+|---|---|---|
+| **Non-ASAN** (afl-clang-lto) | `afl-clang-lto` | ✅ Built to `/workspace/graphviz/build_afl/` |
+| **CMPLOG** (afl-clang-lto) | `afl-clang-lto` w/ `AFL_LLVM_CMPLOG=1` | ✅ Built to `/workspace/graphviz/build_cmplog/` |
+
+**Note:** ASAN was not used — this AFL++ build always enables it in `afl-clang-fast`/`afl-clang-lto`, but the sh
+2026-06-22 19:11:19 [INFO] [Phase 2] agent completed
+2026-06-22 19:11:19 [INFO] 
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO]   Phase 2 — Complete (6447 messages, 634.1s)
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_manifest.json (4.7 KB)
+2026-06-22 19:11:19 [INFO] 
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO]   Pipeline Complete! (total 634.5s)
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO] 
+2026-06-22 19:11:19 [INFO] Artifacts:
+2026-06-22 19:11:19 [INFO]   E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz/
+2026-06-22 19:11:19 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\command_combinations.json (33.2 KB)
+2026-06-22 19:11:19 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\call_tree.md (19.6 KB)
+2026-06-22 19:11:19 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\coverage_summary.md (7.3 KB)
+2026-06-22 19:11:19 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\vulnerability_path_scores.md (14.9 KB)
+2026-06-22 19:11:19 [INFO]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\fuzz_manifest.json (4.7 KB)
+2026-06-22 19:11:19 [WARNING]   [artifact] E:\AAAAwork\2026\vulnerability discovery\aflplusplus\auto_fuzz\outputs\graphviz\issues\SUMMARY.md (NOT YET CREATED)
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO]   Pipeline State Check
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO]   [OK] COMPLETE Phase 1: Program Analysis
+2026-06-22 19:11:19 [INFO]   [OK] COMPLETE Phase 2: Preprocess
+2026-06-22 19:11:19 [INFO]   [..] PENDING Phase 3: Execute Fuzz
+2026-06-22 19:11:19 [INFO]   [..] PENDING Phase 4: Issue Generator
+2026-06-22 19:11:19 [INFO] ============================================================
+2026-06-22 19:11:19 [INFO] Pipeline finished
