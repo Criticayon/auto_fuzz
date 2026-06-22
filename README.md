@@ -86,6 +86,9 @@ python -m pipeline.webui
 - **Stopped Strategies**：已终止的策略单独成表，记录最终状态，重启后依然保留
 - **自动刷新**：每 5 秒轮询一次状态
 
+图例：
+![alt text](image-1.png)
+
 ### 工作空间管理
 
 - **Clean Workspace**：一键终止所有 afl-fuzz 进程 + 清空容器 fuzz 目录 + 清空本地 output 目录
