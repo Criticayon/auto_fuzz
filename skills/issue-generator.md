@@ -4,13 +4,13 @@ description: "Generate developer-facing GitHub Issue reports from AFL++ fuzzing 
 license: Apache-2.0
 compatibility: "Linux (primary), macOS, Windows (WSL). Requires fuzzing campaign results: reports/SUMMARY.md + crashes/<type>/ folders."
 metadata:
-  version: "2.0"
+  version: "3.0"
   depends_on: ["crash-reporter"]
 ---
 
 # Issue Generator: Fuzz Results → GitHub Issues
 
-Automatically generates developer-facing GitHub Issue reports from AFL++ fuzzing campaign results. This is the final step in the vulnerability discovery pipeline: converting confirmed crashes into actionable, well-structured bug reports suitable for submission to open-source project maintainers.
+Automatically generates developer-facing vulnerability reports from AFL++ fuzzing campaign results. Individual GitHub Issues are in **English**; the internal summary report is in **Chinese (中文)**.
 
 ---
 
@@ -19,7 +19,7 @@ Automatically generates developer-facing GitHub Issue reports from AFL++ fuzzing
 ```
 Phase 1: Load Results     → Read reports/SUMMARY.md + list crashes/<type>/ folders
 Phase 2: Analyze Vulns    → Read each crash's poc + reproduce.sh, extract ASAN output, map CWE
-Phase 3: Generate Issues  → Create issue_<crash_type>.md per vuln + issues/SUMMARY.md
+Phase 3: Generate Issues  → Create issue_<crash_type>.md (English) per vuln + issues/SUMMARY.md (中文)
 Phase 4: Output           → List all generated issue file paths
 ```
 
@@ -150,6 +150,13 @@ Map the ASAN error type to a CWE and add context based on the call stack:
 - For **heap-use-after-free**: Identify the free site and the subsequent use site (CWE-416)
 - For **SEGV**: Determine if it's NULL deref (CWE-476) or out-of-bounds (CWE-119)
 - For **integer overflow**: Look for arithmetic operations on untrusted sizes (CWE-190)
+- For **assertion failure / abort** (no ASAN error, just `Assertion failed` or `SIGABRT`): **Do not blindly classify as CWE-617.** Analyze what the assert is checking:
+  - `assert(index < size)` or `assert(i >= 0 && i < count)` → guard against **OOB access**, classify as CWE-122/CWE-787 (the assert caught the real memory bug early)
+  - `assert(ptr != NULL)` or `assert(ptr->field)` (null check on a pointer dereference) → guard against **NULL pointer dereference**, classify as CWE-476
+  - `assert(bez->eflag)` / `assert(np->cells)` (member access on a pointer) → guard against **NULL pointer dereference**, classify as CWE-476
+  - `assert(x == y)` / `assert(m > 0 && n > 0)` (purely logical/validation check with no memory safety implication) → CWE-617 (Reachable Assertion)
+  - Rule of thumb: if the assert prevents a memory-safety violation (OOB, UAF, NULL deref), treat it as that underlying CWE, not as "just an assertion". Only pure input validation / invariant checks with no memory safety implication get CWE-617.
+  - **Labeling**: For memory bugs caught by assert (no ASAN error), append `[assert-guarded]` to the vulnerability title/type to indicate the developer had a defensive check in place but the underlying bug still exists.
 
 ### Step 5: Analyze root cause
 
@@ -162,17 +169,21 @@ For each vulnerability, analyze the root cause based on:
 
 ---
 
-## Phase 3: Generate GitHub Issue Markdown Files
+## Phase 3: Generate Vulnerability Reports (English Issues + 中文 Summary)
 
-### Step 1: Create issues output directory
+### Step 1: Create output directories
 
 ```bash
 mkdir -p issues
 ```
 
-### Step 2: Generate individual issue for each crash type
+### Step 2: Group vulnerabilities by tool/component
 
-For each crash type folder, generate a GitHub Issue markdown file:
+Group the crash types by the tool or component that produced them (e.g., gml2gv, gvpr, dot). This makes the report more structured.
+
+### Step 3: Generate individual issue for each crash type
+
+For each crash type folder, generate a GitHub Issue markdown file in **English** (for submission to upstream developers):
 
 ```bash
 source target_metadata.sh 2>/dev/null
@@ -192,80 +203,131 @@ if [ -z "${REPORT_DATE:-}" ]; then
 fi
 ```
 
-Issue file template — generate one file per crash type:
+Issue file template (in English) — generate one file per crash type:
 
 ```markdown
 # Vulnerability Report: <crash_type> in <target>
 
-## Description
-[Brief description of the vulnerability nature]
+## Summary
 
-## Environment
-- **Target**: <project_name>
-- **Version**: <version>
-- **Commit**: <commit_hash>
-- **Build**: AFL++ with AddressSanitizer
-- **OS**: Linux
-- **Report Date**: <date>
+| Field | Value |
+|-------|-------|
+| **Target** | <project_name> |
+| **Version** | <version> |
+| **Commit** | <commit_hash> |
+| **Build** | AFL++ + AddressSanitizer |
+| **OS** | Linux |
+| **Report Date** | <date> |
 
 ## CWE Classification
+
 - **CWE-XXX**: <category>
 
-## Steps to Reproduce
-1. Build the target (same environment as above)
-2. Run the following PoC:
+## Description
+
+[Brief description of the vulnerability]
+
+## Reproduction Steps
+
+1. Trigger using the following PoC:
 
 ```bash
 <reproduction command>
 ```
 
-3. Observe the ASAN output
+2. Observe the ASAN output
 
 ## ASAN Report
+
 ```
 <full ASAN output>
 ```
 
 ## Root Cause Analysis
-[Analysis based on call chain and source code]
 
-## Suggested Fix (if applicable)
-[Optional: suggested fix]
+[Analysis based on call stack and source code]
+
+- **Trigger Location**: `<file:line>`
+- **Call Chain**: <function_a → function_b → ...>
+- **Root Cause**: [Detailed analysis]
+
+## Fix Suggestion (if any)
+
+[Optional: suggested fix approach]
 
 ## Attachments
-- PoC file: crashes/<crash_type>/poc
-- Reproduce script: crashes/<crash_type>/reproduce.sh
+
+- PoC file: `crashes/<crash_type>/poc`
+- Reproduction script: `crashes/<crash_type>/reproduce.sh`
 ```
 
 Save as `issues/issue_<crash_type>.md`.
 
-### Step 3: Generate issues summary
+### Step 4: Generate summary report (issues/SUMMARY.md)
 
+Generate a comprehensive Chinese-language summary report that follows this format:
+
+```markdown
+# Fuzzing Campaign Summary — <Project Name>
+
+## 基本信息
+
+| 字段 | 值 |
+|------|-----|
+| **目标程序** | <project_name> |
+| **版本** | <version> |
+| **提交** | <commit_hash> |
+| **报告日期** | <date> |
+| **总崩溃数** | <total_crashes> |
+| **独立漏洞数** | <total_vulns> |
+
+---
+
+## <工具1>（<crash_count> 个崩溃 → <vuln_count> 个漏洞）
+
+### 漏洞 <编号>：<漏洞标题>
+
+| 字段 | 值 |
+|------|-----|
+| **位置** | <文件:行号> |
+| **ASAN** | <error_type> |
+| **实例** | <count> |
+
+**根因：** [详细分析]
+
+**复现：**
 ```bash
-cat > issues/SUMMARY.md << 'EOF'
-# Vulnerability Reports Summary
+<reproduction command>
+```
 
-The following issues have been identified during the fuzzing campaign. Each issue corresponds to a confirmed vulnerability with a reproducible crash.
+---
 
-**Total issues**: <count>
+## 汇总
 
-EOF
+### 按工具
 
-echo "" >> issues/SUMMARY.md
-echo "| # | Issue | CWE | Severity |" >> issues/SUMMARY.md
-echo "|-----|-------|-----|----------|" >> issues/SUMMARY.md
+| 工具 | 总 crash | 独立漏洞 | 主要类型 |
+|------|---------|---------|---------|
+| <tool1> | <count> | <count> | <types> |
 
-counter=1
-for issue in issues/issue_*.md; do
-  [ -f "$issue" ] || continue
-  title=$(head -1 "$issue" | sed 's/^# //')
-  cwe=$(grep "CWE-" "$issue" | head -1 | sed 's/.*\*\*//;s/\*\*.*//')
-  echo "| $counter | [$title]($(basename "$issue")) | $cwe | TBD |" >> issues/SUMMARY.md
-  counter=$((counter + 1))
-done
+### 完整漏洞列表
 
-echo ""
-echo "Issue summary saved: issues/SUMMARY.md"
+| # | 漏洞 | 工具 | 类型 | 实例 | 文件:行号 | 严重程度 |
+|---|------|------|------|------|-----------|---------|
+| <id> | <title> | <tool> | **<asan_type>** | <count> | `<file:line>` | 🔴 **高** / 🟡 中 / 🟢 低 |
+
+**严重程度判定标准：**
+- 🔴 **高** — 内存越界读写（heap-buffer-overflow、global-buffer-overflow、use-after-free）
+- 🟡 **中** — 可控空指针解引用、栈溢出
+- 🟢 **低** — 纯逻辑断言失败（CWE-617，不涉及内存安全）、不可利用的 SEGV
+
+**注意：** 断言 `assert(index < size)`、`assert(ptr)` 等本质是拦截内存错误（OOB / NULL deref），不应按"断言"归类为低危，应按其拦截的内存错误类型判定严重程度。只有纯逻辑校验断言（如 `assert(m > 0 && n > 0)`、`assert(a == b)`）才标 🟢 低。**类型**列也应当体现底层的内存错误类型（如 heap-buffer-overflow / null-deref），而非笼统地写 "assertion"。被 assert 捕获的漏洞在标题后加 `[assert-guarded]` 标注。
+
+### Fuzzing 统计
+
+| 工具 | 运行时间 | Edges | Bitmap | 执行速度 | 总 crash |
+|------|---------|-------|--------|---------|---------|
+| <tool> | <time> | <edges>/<total> | <pct> | <speed>/s | <count> |
 ```
 
 ---

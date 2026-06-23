@@ -440,6 +440,18 @@ async def api_pipeline_stop():
     return {"status": "stopped", "total_crashes": total_crashes}
 
 
+@app.get("/api/summary")
+async def api_summary(target: str = ""):
+    """返回 reports/SUMMARY.md 内容。"""
+    if not target:
+        return {"error": "no target", "content": ""}
+    path = BASE_DIR / "outputs" / target / "reports" / "SUMMARY.md"
+    if not path.exists():
+        return {"error": "not found", "content": ""}
+    content = path.read_text(encoding="utf-8")
+    return {"content": content}
+
+
 @app.get("/api/projects")
 async def api_projects():
     return {"projects": list_projects()}
@@ -471,14 +483,21 @@ INDEX_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Auto-Fuzz Control Center</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #f5f6f8; color: #24292f; min-height: 100vh; }
-  .header { background: #ffffff; border-bottom: 1px solid #d0d7de; box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-  .header h1 { font-size: 22px; font-weight: 600; color: #1f2328; }
-  .header h1 span { color: #0969da; }
-  .header .subtitle { font-size: 13px; color: #656d76; margin-top: 2px; }
-  .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #fef7e8; color: #24292f; min-height: 100vh; }
+  .header { background: linear-gradient(180deg, #d4a373 0%, #b88352 40%, #9c6b3e 100%); border-bottom: none; box-shadow: 0 3px 12px rgba(0,0,0,0.12); padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; position: relative; }
+  .header-left { display: flex; flex-direction: column; gap: 2px; }
+  .header-brand { display: flex; align-items: center; gap: 14px; }
+  .header-icon { font-size: 30px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
+  .header h1 { font-family: 'Orbitron', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 24px; font-weight: 700; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+  .header h1 .highlight { font-weight: 900; }
+  .header .subtitle { font-size: 12px; color: rgba(255,255,255,0.75); letter-spacing: 2.5px; text-transform: uppercase; margin-left: 44px; position: relative; }
+  .header .subtitle::before, .header .subtitle::after { content: '✦'; margin: 0 6px; color: rgba(255,255,255,0.5); font-size: 9px; }
+  .header #globalStatus .badge { border-color: rgba(255,255,255,0.3); }
+  .paper-clip { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 34px; line-height: 1; z-index: 10; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); pointer-events: none; }
+  .container { max-width: 1400px; margin: 28px auto; padding: 28px 32px; background: #ffffff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 6px 24px rgba(0,0,0,0.06); position: relative; z-index: 1; }
   .controls { background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px; margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
   .controls select, .controls button { padding: 8px 16px; border-radius: 6px; font-size: 14px; border: 1px solid #d0d7de; background: #f6f8fa; color: #24292f; }
   .controls button { font-weight: 600; cursor: pointer; transition: all 0.2s; border: none; }
@@ -504,7 +523,7 @@ INDEX_HTML = """\
   .card .value.red { color: #cf222e; }
   .card .value.blue { color: #0969da; }
   .card .value.orange { color: #9a6700; }
-  .section-title { font-size: 15px; font-weight: 600; margin: 20px 0 12px; color: #1f2328; }
+  .section-title { font-family: 'Rajdhani', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 19px; font-weight: 700; margin: 24px 0 14px; color: #1f2328; letter-spacing: 0.3px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; margin-bottom: 24px; }
   th { text-align: left; padding: 10px 14px; background: #f6f8fa; color: #656d76; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid #d0d7de; }
   td { padding: 10px 14px; border-bottom: 1px solid #eaeef2; color: #24292f; }
@@ -556,12 +575,60 @@ INDEX_HTML = """\
   .cmd-detail { background: #f6f8fa; }
   .cmd-detail td { padding: 0 !important; }
   .cmd-detail pre { margin: 0; padding: 10px 14px; font-size: 12px; color: #24292f; white-space: pre-wrap; word-break: break-all; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; line-height: 1.5; max-height: 160px; overflow-y: auto; }
+  .summary-box { background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; padding: 24px 32px; margin-bottom: 16px; font-size: 14px; line-height: 1.7; color: #24292f; overflow-y: auto; }
+  .summary-box h1 { font-size: 22px; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #d0d7de; font-weight: 600; }
+  .summary-box h2 { font-size: 18px; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #eaeef2; font-weight: 600; }
+  .summary-box h3 { font-size: 15px; margin: 16px 0 8px; font-weight: 600; }
+  .summary-box hr { border: none; border-top: 1px solid #d0d7de; margin: 20px 0; }
+  .summary-box p { margin: 8px 0; }
+  .summary-box table { border-collapse: collapse; margin: 12px 0; font-size: 13px; width: auto; min-width: 50%; }
+  .summary-box table th { background: #f6f8fa; font-weight: 600; }
+  .summary-box table td, .summary-box table th { border: 1px solid #d0d7de; padding: 6px 12px; text-align: left; }
+  .summary-box tr:nth-child(even) { background: #fafbfc; }
+  .summary-box pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px 16px; font-size: 12px; overflow-x: auto; line-height: 1.5; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; }
+  .summary-box code { background: #eaeef2; padding: 2px 5px; border-radius: 3px; font-size: 13px; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; }
+  .summary-box pre code { background: none; padding: 0; border-radius: 0; font-size: 12px; }
+  .summary-box ul, .summary-box ol { padding-left: 24px; margin: 8px 0; }
+  .summary-box li { margin: 4px 0; }
+  .summary-box strong { font-weight: 600; }
+  .summary-box em { font-style: italic; }
+  .summary-mode #strategyPanel,
+  .summary-mode #projectBar,
+  .summary-mode #statsGrid,
+  .summary-mode .section-title:not(#summaryTitle),
+  .summary-mode table:not(#summaryBox table),
+  .summary-mode #killedTitle,
+  .summary-mode #killedTable,
+  .summary-mode #logBox,
+  .summary-mode .log-box { display: none !important; }
+  .summary-mode .summary-box { display: block !important; max-height: none; }
+  .summary-mode #summaryWrapper { display: block !important; }
+  @keyframes summaryFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .summary-mode #summaryWrapper { animation: summaryFadeIn 0.35s ease-out; }
+  #summaryWrapper { display: none; }
+  .summary-header { display: flex; align-items: center; gap: 12px; padding: 20px 28px 16px; border-bottom: 2px solid #d0d7de; }
+  .summary-header .icon { width: 36px; height: 36px; background: linear-gradient(135deg, #0969da, #1a7f37); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; flex-shrink: 0; }
+  .summary-header .info { flex: 1; }
+  .summary-header .info .title { font-size: 18px; font-weight: 700; color: #24292f; }
+  .summary-header .info .sub { font-size: 13px; color: #656d76; margin-top: 2px; }
+  .summary-header .badge { font-size: 12px; background: #ddf4ff; color: #0969da; padding: 4px 10px; border-radius: 20px; font-weight: 500; white-space: nowrap; }
+  .loading-skeleton { padding: 20px 0; }
+  .loading-skeleton .bar { background: linear-gradient(90deg, #eaeef2 25%, #f6f8fa 50%, #eaeef2 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .summary-mode #btnPhase5 { background: #cf222e; color: #fff; border-color: #cf222e; }
+  /* ── Code burst particles ── */
+  .code-burst { position: fixed; pointer-events: none; z-index: 9999; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; font-weight: 700; user-select: none; will-change: transform, opacity; animation: codeFloat 1.2s ease-out forwards; }
+  @keyframes codeFloat { 0% { opacity: 1; transform: translate(0,0) rotate(0deg) scale(1); } 100% { opacity: 0; transform: translate(var(--dx),var(--dy)) rotate(var(--r)) scale(0.3); } }
 </style>
 </head>
 <body>
 <div class="header">
-  <div>
-    <h1><span>#</span> Auto-Fuzz Control Center</h1>
+  <div class="paper-clip">&#128206;</div>
+  <div class="header-left">
+    <div class="header-brand">
+      <span class="header-icon">&#128027;</span>
+      <h1>Auto-Fuzz <span class="highlight">Control Center</span></h1>
+    </div>
     <div class="subtitle">Vulnerability Discovery Pipeline</div>
   </div>
   <div id="globalStatus"><span class="badge badge-yellow">Starting...</span></div>
@@ -569,6 +636,7 @@ INDEX_HTML = """\
 
 <div class="container">
 
+  <div class="section-title" style="margin-top:0;">Pipeline</div>
   <div class="controls">
     <select id="targetSelect" style="min-width:160px;">
       <option value="">-- Select target --</option>
@@ -577,7 +645,7 @@ INDEX_HTML = """\
     <button class="btn-primary" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button>
     <div class="tooltip-wrap"><button class="btn-primary" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div>
     <button class="btn-primary" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button>
-    <button class="btn-danger" id="btnStop" onclick="stopAll()">Stop</button>
+    <button class="btn-secondary" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button>
     <button class="btn-secondary" id="btnClean" onclick="cleanWorkspace()" style="border-color:#cf222e;color:#cf222e;">Clean</button>
     <span id="pipelineStatus" style="font-size:13px;color:#656d76;margin-left:8px;"></span>
   </div>
@@ -588,6 +656,7 @@ INDEX_HTML = """\
       <span style="font-size:12px;color:#656d76;" id="strategyCount"></span>
       <span class="spacer" style="flex:1;"></span>
       <button onclick="loadManifest()" style="font-size:12px;padding:4px 10px;border:1px solid #d0d7de;border-radius:4px;background:#f6f8fa;color:#656d76;cursor:pointer;">Refresh</button>
+      <button class="kill-btn" id="btnStopAll" onclick="stopAllStrategies()" style="display:none;">Stop All</button>
       <label style="font-size:13px;color:#656d76;cursor:pointer;">
         <input type="checkbox" id="selectAllStrategies" checked onchange="toggleAllStrategies()"> Select All
       </label>
@@ -615,6 +684,7 @@ INDEX_HTML = """\
     <div class="spacer"></div>
   </div>
 
+  <div class="section-title" style="margin-bottom:12px;">Overview</div>
   <div class="grid" id="statsGrid">
     <div class="card"><div class="label">Total Strategies</div><div class="value blue" id="stratCount">—</div></div>
     <div class="card"><div class="label">Active Processes</div><div class="value blue" id="procCount">—</div></div>
@@ -626,7 +696,7 @@ INDEX_HTML = """\
   <div class="section-title">Strategies</div>
   <table>
     <thead><tr><th></th><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th><th></th></tr></thead>
-    <tbody id="strategiesBody"><tr><td colspan="10" style="text-align:center;color:#8b949e;">Waiting...</td></tr></tbody>
+    <tbody id="strategiesBody"><tr><td colspan="11" style="text-align:center;color:#8b949e;">Waiting...</td></tr></tbody>
   </table>
 
   <div class="section-title" id="killedTitle" style="display:none;">Stopped Strategies</div>
@@ -635,12 +705,27 @@ INDEX_HTML = """\
     <tbody id="killedBody"></tbody>
   </table>
 
+  <div id="summaryWrapper">
+    <div class="card" style="padding:0;">
+      <div class="summary-header">
+        <div class="icon">&#128269;</div>
+        <div class="info">
+          <div class="title">Campaign Summary</div>
+          <div class="sub" id="summaryTarget"></div>
+        </div>
+        <span class="badge">Phase 5</span>
+      </div>
+      <div class="summary-box" id="summaryBox"></div>
+    </div>
+  </div>
+
   <div class="section-title">Log</div>
   <div class="log-box" id="logBox">(waiting for data...)</div>
 </div>
 
 <div class="footer">Auto-Fuzz Control Center · auto-refresh 5s</div>
 
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 let polling = true;
 let logAtBottom = true;
@@ -676,10 +761,13 @@ function updateDashboard() {
     document.getElementById('btnPhase2').disabled = running || noTarget;
     document.getElementById('btnPhase3').disabled = d.pipeline_running || noTarget;
     document.getElementById('btnPhase4').disabled = running || noTarget;
+    document.getElementById('btnPhase5').disabled = noTarget;
     document.getElementById('btnClean').disabled = running || noTarget;
-    // 没选项目时隐藏追加提示
+    // Stop All 按钮：有正在跑的进程才显示
+    document.getElementById('btnStopAll').style.display = d.running ? 'inline-block' : 'none';
+    // 没选项目或没有 afl-fuzz 在跑时隐藏追加提示
     const tt = document.querySelector('.tooltip-wrap .tooltip-text');
-    if (tt) tt.style.display = noTarget ? 'none' : '';
+    if (tt) tt.style.display = (noTarget || !d.running) ? 'none' : '';
 
     // 项目显示 + 动画条
     const pBar = document.getElementById('projectBar');
@@ -756,6 +844,30 @@ function toggleCmd(idx) {
     if (!window._expandedRows) window._expandedRows = new Set();
     if (show) window._expandedRows.add(idx);
     else window._expandedRows.delete(idx);
+  }
+}
+
+async function showSummary() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const isActive = document.body.classList.contains('summary-mode');
+  if (isActive) {
+    // 退出 summary 模式
+    document.body.classList.remove('summary-mode');
+    document.getElementById('btnPhase5').textContent = 'Phase 5: Summary';
+    return;
+  }
+  // 进入 summary 模式
+  document.body.classList.add('summary-mode');
+  document.getElementById('btnPhase5').textContent = '\u2190 Back';
+  document.getElementById('summaryTarget').textContent = target;
+  const box = document.getElementById('summaryBox');
+  box.innerHTML = '<div class="loading-skeleton"><div class="bar" style="width:60%;height:24px;margin-bottom:20px;"></div><div class="bar" style="width:40%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:100%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:80%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:55%;height:14px;margin-bottom:24px;"></div><div class="bar" style="width:45%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:90%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:70%;height:14px;"></div></div>';
+  const d = await api('/api/summary?target=' + encodeURIComponent(target));
+  if (d && d.content) {
+    box.innerHTML = marked.parse(d.content);
+  } else {
+    box.innerHTML = '<div style="text-align:center;color:#656d76;padding:60px 20px;font-size:15px;">No SUMMARY.md found for <strong>' + target + '</strong>. Run fuzzing and Phase 4 first to generate reports.</div>';
   }
 }
 
@@ -869,7 +981,7 @@ async function killStrategy(pid) {
       var rowPid = cells[2].textContent.trim();
       if (rowPid === String(pid)) {
         strategyData = {
-          name: cells[1].textContent.replace(/[⚡\s]+$/, '').trim(),
+          name: cells[1].textContent.replace(/[\u26a0\u26a1].*$/, '').trim(),
           pid: pid,
           edges: cells[3].textContent.trim(),
           crashes: cells[4].textContent.trim(),
@@ -892,6 +1004,12 @@ async function killStrategy(pid) {
   if (r && r.status === 'killed') {
     updateDashboard();
   }
+}
+
+async function stopAllStrategies() {
+  if (!confirm('Stop all running AFL++ strategies?')) return;
+  await api('/api/pipeline/stop', {method:'POST'});
+  updateDashboard();
 }
 
 async function cleanWorkspace() {
@@ -994,6 +1112,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadManifest();
     updateDashboard();
     loadRefContext();
+    // 切换项目时退出 summary
+    document.body.classList.remove('summary-mode');
   });
 });
 
@@ -1011,6 +1131,32 @@ api('/api/projects').then(d => {
 
 setInterval(updateDashboard, 5000);
 updateDashboard();
+
+// ── Interactive code burst on background click ──
+const CODE_TOKENS = ['</>','{ }','0x00','afl','fuzz','/*..*/','for(;;)','while','if()','ptr->','++','!=','&&','||','SIGSEGV','ASAN','#include','[ ]','malloc','free','0xFF','{;}','==','!','main()','--','=>','::'];
+document.addEventListener('click', e => {
+  if (e.target.closest('button,select,input,a,option')) return;
+  const count = 6 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('span');
+    el.className = 'code-burst';
+    el.textContent = CODE_TOKENS[Math.floor(Math.random() * CODE_TOKENS.length)];
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 60 + Math.random() * 100;
+    const size = 12 + Math.random() * 14;
+    const hue = 200 + Math.random() * 60;
+    el.style.left = (e.clientX + (Math.random() - 0.5) * 20) + 'px';
+    el.style.top = (e.clientY + (Math.random() - 0.5) * 20) + 'px';
+    el.style.fontSize = size + 'px';
+    el.style.color = 'hsla(' + hue + ',70%,50%,0.9)';
+    el.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+    el.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+    el.style.setProperty('--r', (Math.random() - 0.5) * 720 + 'deg');
+    el.style.animationDuration = (0.6 + Math.random() * 0.8) + 's';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1500);
+  }
+});
 </script>
 </body>
 </html>"""

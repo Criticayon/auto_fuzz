@@ -14,6 +14,8 @@ Phase 2: Preprocess        → 编译 target（AFL++ + ASAN）、收集种子、
 Phase 3: Execute Fuzz      → 读取 manifest，并行启动 AFL++ 策略，实时监控覆盖率和崩溃
       ↓
 Phase 4: Issue Generator   → 崩溃复现、ASAN 去重、生成 GitHub Issue 报告
+      ↓
+Phase 5: Summary           → 查看本次 fuzz 活动的完整报告汇总
 ```
 
 每个阶段由 Claude Code agent 通过预定义的 skill 自主执行，中间结果持久化到 `outputs/<project>/`，支持断点续跑。
@@ -46,7 +48,7 @@ python -m pipeline.webui
 
 ## Web UI 功能
 
-### 4 阶段流水线控制
+### 5 阶段流水线控制
 
 | 阶段 | 按钮 | 功能 |
 |------|------|------|
@@ -54,6 +56,7 @@ python -m pipeline.webui
 | Phase 2 | Prep | 编译 target + 生成种子 + 创建 `fuzz_manifest.json` |
 | Phase 3 | Fuzz | 读取 manifest，启动用户选中的 AFL++ 策略 |
 | Phase 4 | Issues | 崩溃复现 + 去重 + 生成 GitHub Issue |
+| Phase 5 | Summary | 查看完整的 fuzz 活动汇总报告 |
 
 ### 策略管理
 
@@ -88,6 +91,12 @@ python -m pipeline.webui
 
 图例：
 ![alt text](image-1.png)
+
+### 活动汇总
+
+- **Phase 5: Summary**：一键查看当前项目的完整 `SUMMARY.md` 报告
+- 点击后切换到全屏阅读模式，支持表格、代码块、标题等完整 Markdown 渲染
+- 切换项目或再次点击 Phase 5 退出汇总视图
 
 ### 工作空间管理
 
