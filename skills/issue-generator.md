@@ -4,7 +4,7 @@ description: "Generate developer-facing GitHub Issue reports from AFL++ fuzzing 
 license: Apache-2.0
 compatibility: "Linux (primary), macOS, Windows (WSL). Requires fuzzing campaign results: reports/SUMMARY.md + crashes/<type>/ folders."
 metadata:
-  version: "3.0"
+  version: "3.1"
   depends_on: ["crash-reporter"]
 ---
 
@@ -18,7 +18,8 @@ Automatically generates developer-facing vulnerability reports from AFL++ fuzzin
 
 ```
 Phase 1: Load Results     → Read reports/SUMMARY.md + list crashes/<type>/ folders
-Phase 2: Analyze Vulns    → Read each crash's poc + reproduce.sh, extract ASAN output, map CWE
+Phase 2: Analyze Vulns    → Read each crash's poc + reproduce.sh (with crash_count comment),
+                             extract ASAN output, map CWE
 Phase 3: Generate Issues  → Create issue_<crash_type>.md (English) per vuln + issues/SUMMARY.md (中文)
 Phase 4: Output           → List all generated issue file paths
 ```
@@ -92,7 +93,7 @@ fi
 
 For each crash type folder in `crashes/`, perform the following analysis.
 
-### Step 1: Read PoC and reproduce command
+### Step 1: Read PoC, reproduce command, and crash count
 
 ```bash
 crash_type_dir="$1"
@@ -104,7 +105,11 @@ echo "  PoC file: $poc_file"
 
 # Read reproduce script
 repro_cmd=$(cat "${crash_type_dir}/reproduce.sh" 2>/dev/null)
-echo "  Reproduce command: $repro_cmd"
+
+# Read crash count from crash_count.txt
+crash_count=$(cat "${crash_type_dir}/crash_count.txt" 2>/dev/null || echo "1")
+echo "  Crash instances: $crash_count"
+echo "  Reproduce command: $(echo "$repro_cmd" | grep -v '^#!' | head -1)"
 ```
 
 ### Step 2: Reproduce with ASAN and capture output
@@ -165,7 +170,8 @@ For each vulnerability, analyze the root cause based on:
 1. **ASAN error type** — what kind of memory corruption
 2. **Call stack** — which functions are involved, which source file/line
 3. **Crash input (PoC)** — what kind of input triggers it
-4. **Program analysis context** (if `vulnerability_path_scores.md` available) — which command combination and code path
+4. **Crash instance count** — how many raw crash inputs correspond to this unique bug (indicates how easily / frequently it's triggered). Read from `reproduce.sh`'s `# crash_count:` comment.
+5. **Program analysis context** (if `vulnerability_path_scores.md` available) — which command combination and code path
 
 ---
 
@@ -183,7 +189,7 @@ Group the crash types by the tool or component that produced them (e.g., gml2gv,
 
 ### Step 3: Generate individual issue for each crash type
 
-For each crash type folder, generate a GitHub Issue markdown file in **English** (for submission to upstream developers):
+For each crash type folder, generate a GitHub Issue markdown file in **English** (for submission to upstream developers). Include the crash instance count:
 
 ```bash
 source target_metadata.sh 2>/dev/null
@@ -203,69 +209,97 @@ if [ -z "${REPORT_DATE:-}" ]; then
 fi
 ```
 
-Issue file template (in English) — generate one file per crash type:
+Issue file template (in English) — generate one file per crash type, following this exact format:
 
 ```markdown
-# Vulnerability Report: <crash_type> in <target>
-
-## Summary
-
-| Field | Value |
-|-------|-------|
-| **Target** | <project_name> |
-| **Version** | <version> |
-| **Commit** | <commit_hash> |
-| **Build** | AFL++ + AddressSanitizer |
-| **OS** | Linux |
-| **Report Date** | <date> |
-
-## CWE Classification
-
-- **CWE-XXX**: <category>
-
 ## Description
 
-[Brief description of the vulnerability]
+The crash occurs in: `<function_name>`
+[Brief description of the crash — what the function does wrong, what condition triggers it]
+
+ASAN reports indicate: [specific ASAN finding, e.g., reads past allocated region]
+
+---
+
+## Environment
+
+* <project_name> version: <version> (commit <commit_hash>)
+* Compiler: clang / afl-clang-fast
+* Instrumentation: AFL++ + ASAN
+* OS: Linux
+
+---
+
+## Build Configuration
+```bash
+build() {
+  export AFL_USE_ASAN=1
+  cd $SRC_DIR
+  mkdir -p build-afl
+  cd build-afl
+
+  CC=afl-clang-fast \
+  CXX=afl-clang-fast++ \
+  cmake ..
+
+  make -j$(nproc)
+  echo "[+] build done"
+}
+```
+
+---
 
 ## Reproduction Steps
 
-1. Trigger using the following PoC:
-
+Run:
 ```bash
 <reproduction command>
 ```
 
-2. Observe the ASAN output
+---
+
+## PoC
+
+See attached file: `crashes/<crash_type>/poc`
+
+---
 
 ## ASAN Report
 
+ASAN frame info:
+```text
+<full ASAN output — include EVERYTHING: ERROR line, stack trace, memory region info, shadow bytes, SUMMARY, ABORTING>
 ```
-<full ASAN output>
+
+---
+
+## Affected Code
+
+`<file:line>` (from crash log)
+
+```<source_lang>
+// Read the source code around the crash location and paste it here
+// Indicate the exact line that crashes with a <--- CRASH HERE comment
 ```
+
+---
 
 ## Root Cause Analysis
 
-[Analysis based on call stack and source code]
+[Detailed analysis of why the crash occurs, referencing the source code]
 
-- **Trigger Location**: `<file:line>`
-- **Call Chain**: <function_a → function_b → ...>
-- **Root Cause**: [Detailed analysis]
+---
 
-## Fix Suggestion (if any)
+## Impact
 
-[Optional: suggested fix approach]
-
-## Attachments
-
-- PoC file: `crashes/<crash_type>/poc`
-- Reproduction script: `crashes/<crash_type>/reproduce.sh`
+* **Denial of Service (DoS)**: The application crashes when processing malformed input.
 ```
 
 Save as `issues/issue_<crash_type>.md`.
 
 ### Step 4: Generate summary report (issues/SUMMARY.md)
 
-Generate a comprehensive Chinese-language summary report that follows this format:
+Generate a comprehensive Chinese-language summary report. Include crash instance counts for every vulnerability. **不要在漏洞列表中出现"变体B"、"变体C"这类标签——crash-reporter 已按触发函数去重，每个漏洞只有一个条目，实例数体现在 crash_count 中。**
 
 ```markdown
 # Fuzzing Campaign Summary — <Project Name>
@@ -291,7 +325,7 @@ Generate a comprehensive Chinese-language summary report that follows this forma
 |------|-----|
 | **位置** | <文件:行号> |
 | **ASAN** | <error_type> |
-| **实例** | <count> |
+| **Crash 样本数** | <count> |
 
 **根因：** [详细分析]
 
@@ -312,8 +346,8 @@ Generate a comprehensive Chinese-language summary report that follows this forma
 
 ### 完整漏洞列表
 
-| # | 漏洞 | 工具 | 类型 | 实例 | 文件:行号 | 严重程度 |
-|---|------|------|------|------|-----------|---------|
+| # | 漏洞 | 工具 | 类型 | 实例数 | 文件:行号 | 严重程度 |
+|---|------|------|------|--------|-----------|---------|
 | <id> | <title> | <tool> | **<asan_type>** | <count> | `<file:line>` | 🔴 **高** / 🟡 中 / 🟢 低 |
 
 **严重程度判定标准：**

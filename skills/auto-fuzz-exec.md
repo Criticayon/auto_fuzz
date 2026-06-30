@@ -75,16 +75,50 @@ BATCH_SIZE=$(python3 -c "import json; print(json.load(open('$MANIFEST'))['batch_
 
 For each strategy in the first batch, construct the `nohup afl-fuzz ...` command and launch it detached in the container using `container_exec_detached`.
 
-### ⛔ HARD RULE: Memory limit `-m` max 4096, never `none`
+### Memory limit: ASAN 检测与处理
 
-```
-✅ 正确: afl-fuzz ... -m 4096 ... -- ./target @@
-✅ 正确: afl-fuzz ... -m 1024 ... -- ./target @@
-❌ 禁止: afl-fuzz ... -m none ... -- ./target @@
-❌ 禁止: afl-fuzz ... -m 8192 ... -- ./target @@
+ASAN 需要 ~20TB 虚拟地址空间用于 shadow memory，与 AFL++ 的 `-m 4096` (RLIMIT_AS) 冲突。**不要使用 `-m none`**——正确做法是重新编译一个不带 ASAN 的 fuzzing 专用 binary。
+
+**检测方法** —— 检查目标二进制是否包含 ASAN 符号：
+```bash
+nm $TARGET_BINARY 2>/dev/null | grep -q __asan && echo "ASAN" || echo "no-ASAN"
 ```
 
-**The manifest's `command` field already contains the correct afl-fuzz command with proper `-m` values. Do not modify the memory limit.**
+**如果检测到 ASAN：重新编译不带 ASAN 的版本**
+
+```bash
+# 找到原来的构建配置（从 target_metadata.sh 或 CMakeLists.txt）
+# 新建一个 build 目录
+mkdir -p /workspace/fuzz_<project>/build_noasan
+cd /workspace/fuzz_<project>/build_noasan
+
+# 用 afl-clang-fast 编译，但确保 AFL_USE_ASAN 未被设置
+# 重要: AFL_USE_ASAN=0 仍会被 afl-clang-fast 视为启用，必须用 env -u 彻底清除
+env -u AFL_USE_ASAN cmake .. \
+  -DCMAKE_C_COMPILER=afl-clang-fast \
+  -DCMAKE_CXX_COMPILER=afl-clang-fast++ \
+  <其他原有的 cmake 参数>
+
+env -u AFL_USE_ASAN make -j$(nproc)
+```
+
+**同样重建 CMPLOG 变体：**
+```bash
+mkdir -p /workspace/fuzz_<project>/build_noasan_cmplog
+cd /workspace/fuzz_<project>/build_noasan_cmplog
+
+env -u AFL_USE_ASAN cmake .. \
+  -DCMAKE_C_COMPILER=afl-clang-fast \
+  -DCMAKE_CXX_COMPILER=afl-clang-fast++ \
+  -DAFL_CMPLOG=1 \
+  <其他原有的 cmake 参数>
+
+env -u AFL_USE_ASAN make -j$(nproc)
+```
+
+**验证无误后更新配置：**
+- 更新 `target_metadata.sh` 中的 binary 路径，指向新编译的不带 ASAN 的 binary
+- manifest 中的 command 使用 `-m 4096`（不需要 `-m none`）
 
 ### Launch each strategy
 
@@ -177,7 +211,7 @@ The agent should then **exit cleanly**. Do not wait, do not monitor, do not chec
 - Do NOT implement stagnation detection or batch advancement
 - Do NOT clean up afl-fuzz processes
 - Do NOT wait for fuzzing to complete
-- Do NOT modify the manifest or strategy commands
-- Do NOT change `-m` values from what the manifest specifies
+- Do NOT modify the manifest or strategy commands (except rebuilding without ASAN when detected)
+- Do NOT use `-m none` — rebuild without ASAN instead and use `-m 4096`
 
 Launch, verify, signal, exit.

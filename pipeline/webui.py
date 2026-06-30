@@ -108,7 +108,7 @@ def get_outdir_stats() -> list[dict]:
 
     stats_list = []
     for out_dir, proc in sorted(out_map.items()):
-        raw = docker_exec(f"cat {out_dir}/fuzzer_stats 2>/dev/null || cat {out_dir}/default/fuzzer_stats 2>/dev/null || true")
+        raw = docker_exec(f"cat $(find {out_dir} -name fuzzer_stats -type f 2>/dev/null | head -1) 2>/dev/null || true")
         info = {
             "name": Path(out_dir).name,
             "path": out_dir,
@@ -269,6 +269,52 @@ async def api_workspace_clean(target: str):
     result = clean_workspace(target)
     logger.info("[clean] workspace cleaned for '%s'", target)
     return result
+
+
+@app.post("/api/phase/clean")
+async def api_phase_clean(target: str, phase: int):
+    """清空指定阶段的输出文件。"""
+    if _pipeline_proc and _pipeline_proc.poll() is None:
+        return {"error": "pipeline is running, stop it first"}
+    project_name = Path(target).name
+    host_dir = BASE_DIR / "outputs" / project_name
+    import shutil
+
+    if phase == 1:
+        for f in ["analysis", "call_tree.json", "vulnerability_path_scores.md"]:
+            p = host_dir / f
+            if p.is_dir(): shutil.rmtree(str(p))
+            elif p.exists(): p.unlink()
+        docker_exec(f"rm -rf /workspace/{project_name} 2>/dev/null || true")
+        return {"status": "cleaned", "phase": 1, "target": project_name}
+
+    elif phase == 2:
+        for f in ["fuzz_manifest.json", "fuzz_manifest_selected.json", "fuzz_manifest_select.json", "seeds"]:
+            p = host_dir / f
+            if p.is_dir(): shutil.rmtree(str(p))
+            elif p.exists(): p.unlink()
+        docker_exec(f"rm -rf /workspace/{project_name}/build 2>/dev/null || true")
+        docker_exec(f"rm -f /workspace/fuzz_{project_name}/seeds* /workspace/fuzz_{project_name}/fuzz_manifest* 2>/dev/null || true")
+        return {"status": "cleaned", "phase": 2, "target": project_name}
+
+    elif phase == 3:
+        docker_exec(
+            f"ps aux | grep afl-fuzz | grep '{project_name}' | grep -v grep "
+            f"| awk '{{print $2}}' | xargs -r kill -9 2>/dev/null || true"
+        )
+        docker_exec(f"rm -rf /workspace/fuzz_{project_name} 2>/dev/null || true")
+        p = host_dir / "killed_strategies.json"
+        if p.exists(): p.unlink()
+        return {"status": "cleaned", "phase": 3, "target": project_name}
+
+    elif phase == 4:
+        for f in ["crashes", "reports", "issues"]:
+            p = host_dir / f
+            if p.is_dir(): shutil.rmtree(str(p))
+        docker_exec(f"rm -rf /workspace/fuzz_{project_name}/all_crashes /workspace/fuzz_{project_name}/crashes_dedup 2>/dev/null || true")
+        return {"status": "cleaned", "phase": 4, "target": project_name}
+
+    return {"error": f"invalid phase: {phase}"}
 
 
 def _save_killed(target: str):
@@ -501,6 +547,10 @@ INDEX_HTML = """\
   .controls { background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px; margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
   .controls select, .controls button { padding: 8px 16px; border-radius: 6px; font-size: 14px; border: 1px solid #d0d7de; background: #f6f8fa; color: #24292f; }
   .controls button { font-weight: 600; cursor: pointer; transition: all 0.2s; border: none; }
+  .phase-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .phase-clear { font-size: 11px; color: #8b949e; cursor: pointer; padding: 0 4px; border: none; background: none; transition: color .15s; }
+  .phase-clear:hover { color: #cf222e; }
+  .phase-clear:disabled { opacity: .3; cursor: not-allowed; }
   .btn-primary { background: #0969da; color: #fff; }
   .btn-primary:hover { background: #0550ae; }
   .btn-danger { background: #cf222e; color: #fff; }
@@ -641,12 +691,12 @@ INDEX_HTML = """\
     <select id="targetSelect" style="min-width:160px;">
       <option value="">-- Select target --</option>
     </select>
-    <button class="btn-primary" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button>
-    <button class="btn-primary" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button>
-    <div class="tooltip-wrap"><button class="btn-primary" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div>
-    <button class="btn-primary" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button>
-    <button class="btn-secondary" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button>
-    <button class="btn-secondary" id="btnClean" onclick="cleanWorkspace()" style="border-color:#cf222e;color:#cf222e;">Clean</button>
+    <div class="phase-group"><button class="btn-primary" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button><button class="phase-clear" id="clsPhase1" onclick="cleanPhase(1)" disabled>clear</button></div>
+    <div class="phase-group"><button class="btn-primary" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button><button class="phase-clear" id="clsPhase2" onclick="cleanPhase(2)" disabled>clear</button></div>
+    <div class="phase-group"><div class="tooltip-wrap"><button class="btn-primary" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div><button class="phase-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
+    <div class="phase-group"><button class="btn-primary" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="phase-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
+    <div class="phase-group"><button class="btn-secondary" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
+    <div><button class="btn-secondary" id="btnClean" onclick="cleanWorkspace()" style="border-color:#cf222e;color:#cf222e;">Clean All</button></div>
     <span id="pipelineStatus" style="font-size:13px;color:#656d76;margin-left:8px;"></span>
   </div>
 
@@ -737,6 +787,7 @@ async function api(url, opts) {
 
 function updateDashboard() {
   const target = document.getElementById('targetSelect').value;
+  loadManifest();
   api('/api/status' + (target ? `?target=${encodeURIComponent(target)}` : '')).then(d => {
     if (!d) return;
     document.getElementById('stratCount').textContent = d.total_strategies || '\u2014';
@@ -762,6 +813,10 @@ function updateDashboard() {
     document.getElementById('btnPhase3').disabled = d.pipeline_running || noTarget;
     document.getElementById('btnPhase4').disabled = running || noTarget;
     document.getElementById('btnPhase5').disabled = noTarget;
+    document.getElementById('clsPhase1').disabled = noTarget;
+    document.getElementById('clsPhase2').disabled = noTarget;
+    document.getElementById('clsPhase3').disabled = noTarget;
+    document.getElementById('clsPhase4').disabled = noTarget;
     document.getElementById('btnClean').disabled = running || noTarget;
     // Stop All 按钮：有正在跑的进程才显示
     document.getElementById('btnStopAll').style.display = d.running ? 'inline-block' : 'none';
@@ -1026,6 +1081,25 @@ async function cleanWorkspace() {
     status.style.color = '#1a7f37';
   } else {
     status.textContent = r && r.error ? r.error : 'Failed to clean';
+    status.style.color = '#cf222e';
+  }
+}
+
+async function cleanPhase(phase) {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const phaseNames = {1:'Analyze',2:'Prep',3:'Fuzz',4:'Issues'};
+  if (!confirm(`Clear all files generated by Phase ${phase} (${phaseNames[phase]}) for "${target}"?`)) return;
+  const status = document.getElementById('pipelineStatus');
+  status.textContent = `Clearing Phase ${phase} output...`;
+  status.style.color = '#9a6700';
+  const r = await api(`/api/phase/clean?target=${encodeURIComponent(target)}&phase=${phase}`, {method:'POST'});
+  if (r && r.status === 'cleaned') {
+    status.textContent = `Phase ${phase} output cleared`;
+    status.style.color = '#1a7f37';
+    updateDashboard();
+  } else {
+    status.textContent = r && r.error ? r.error : 'Failed to clear';
     status.style.color = '#cf222e';
   }
 }

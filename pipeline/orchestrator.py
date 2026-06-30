@@ -211,7 +211,7 @@ def print_state(work_dir: Path) -> None:
 # Pipeline Execution
 # ──────────────────────────────────────────────
 
-async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | None = None) -> None:
+async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | None = None, skills: list[str] | None = None) -> None:
     t0 = time.time()
     logger.info("")
     logger.info("=" * 60)
@@ -224,6 +224,7 @@ async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | 
         allowed_tools=BASE_TOOLS,
         permission_mode=perm_mode,
         mcp_servers=mcp_servers or {},
+        skills=skills,
     )
 
     msg_count = 0
@@ -327,6 +328,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"Save all output files to {work_dir}."
             )
             mcp = None
+            skills_list = None
 
         elif num == 2:
             logger.info(">>> Phase 2: Connecting to AFL++ container...")
@@ -431,12 +433,15 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"Use Write/Read for all operations on the host.\n"
                 f"Save SUMMARY.md to {work_dir}/reports/ on the host.\n"
                 f"Save each unique crash's PoC and reproduce.sh to {work_dir}/crashes/<crash_type>/ on the host.\n"
-                f"Save issue files to {work_dir}/issues/ on the host."
+                f"Save issue files to {work_dir}/issues/ on the host.\n"
+                f"IMPORTANT: SUMMARY.md must be written in Chinese (中文). "
+                f"Individual issue files must be in English."
             )
             mcp = {"container": create_container_server()}
+            skills_list = ["crash-reporter", "issue-generator"]
 
         logger.info(">>> Starting Phase %s: %s", num, label)
-        await run_phase(num, prompt, work_dir, mcp_servers=mcp)
+        await run_phase(num, prompt, work_dir, mcp_servers=mcp, skills=skills_list)
 
         # Phase 1 结束后：确保项目源码在容器内
         if num == 1:
