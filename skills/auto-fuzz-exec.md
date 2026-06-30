@@ -75,16 +75,18 @@ BATCH_SIZE=$(python3 -c "import json; print(json.load(open('$MANIFEST'))['batch_
 
 For each strategy in the first batch, construct the `nohup afl-fuzz ...` command and launch it detached in the container using `container_exec_detached`.
 
-### Memory limit: ASAN 检测与处理
+### Memory limit: fork server 虚拟内存错误处理
 
-ASAN 需要 ~20TB 虚拟地址空间用于 shadow memory，与 AFL++ 的 `-m 4096` (RLIMIT_AS) 冲突。**不要使用 `-m none`**——正确做法是重新编译一个不带 ASAN 的 fuzzing 专用 binary。
+先用 manifest 中的 `-m` 值启动。如果 afl-fuzz 报告 fork server 崩溃，且日志中出现类似 `mmap failed`、`Cannot allocate memory`、`ASAN shadow memory range` 等虚拟内存不足的错误，说明当前 binary 的 ASAN shadow memory (~20TB 虚拟地址空间) 与 `-m` 的 RLIMIT_AS 限制冲突。
 
-**检测方法** —— 检查目标二进制是否包含 ASAN 符号：
+**此时不要使用 `-m none`**——正确做法是重新编译一个不带 ASAN 的 fuzzing 专用 binary。
+
+**如何确定是 ASAN 问题：**
 ```bash
 nm $TARGET_BINARY 2>/dev/null | grep -q __asan && echo "ASAN" || echo "no-ASAN"
 ```
 
-**如果检测到 ASAN：重新编译不带 ASAN 的版本**
+**如果确认是 ASAN 导致 fork server 崩溃，重新编译不带 ASAN 的版本：**
 
 ```bash
 # 找到原来的构建配置（从 target_metadata.sh 或 CMakeLists.txt）
