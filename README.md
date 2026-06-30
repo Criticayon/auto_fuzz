@@ -44,7 +44,7 @@ pip install -e .
 python -m pipeline.webui
 ```
 
-浏览器打开 `http://localhost:8765`，选择目标项目后按阶段执行。
+浏览器打开 `http://localhost:8765`，将待测项目拷贝到auto_fuzz同目录下，然后选择目标项目后按阶段执行即可。
 
 ## Web UI 功能
 
