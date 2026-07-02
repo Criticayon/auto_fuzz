@@ -248,16 +248,15 @@ done
 
 按 `vulnerability_path_scores.md` 的分数排序确定优先级，高分组合优先 fuzz、给更多实例。
 
-### 策略选择原则：工具全覆盖
+### 策略选择原则：尽量多保留
 
-**首要目标：覆盖项目中所有不同的 CLI 工具/入口点**，而不是只 Fuzz 分数最高的几个组合。
-
-例如 Graphviz 有 20 个 CLI 工具（dot、neato、twopi、gvpr、unflatten...），策略应尽量覆盖不同的工具。同一工具的不同参数组合里再按分数选最优的。
+**保留绝大部分策略，不要设人工上限。** 只过滤掉分数过低、几乎没有挖掘价值的组合（如 score < 20 且仅有 CWE-20 类风险）。
 
 选择流程：
-1. 从 `command_combinations.json` 的 `tools[]` 数组遍历，每个 tool 对象自带 `combinations[]`
-2. 每个工具选**分数最高的 1 个组合**作为代表策略
-3. 剩余策略槽位（见下方 Maximum 限制）再从所有工具中按分数补全
+1. 从 `command_combinations.json` 的 `tools[]` 数组遍历，每个工具的所有组合
+2. 覆盖所有工具，每个工具至少选 **1 个最高分组合**
+3. 然后保留其余分数足够高的组合（包括同一工具的不同参数组合）
+4. 最终 manifest 保留全部有效策略，`batch_size` 表示第一批启动多少，后续策略等在后续批次中启动
 
 （如果vulnerability_path_scores.md没有对应命令分数也需要进行尝试，这不是一个紧急的任务，我们希望的是覆盖尽可能高有助于挖出漏洞）
 
@@ -276,15 +275,35 @@ done
 
 **Rules:**
 - **First pass:** cover each distinct CLI tool/entry point with at least one strategy.
-- **Second pass:** fill remaining slots by vulnerability score (highest first).
+- **Second pass:** keep remaining strategies — do NOT cap the total count. Only drop strategies with very low scores (e.g. < 20 and no interesting CWE).
 - Include a **CMPLOG strategy** whenever a CMPLOG binary was built. Apply it to the highest-prio tool.
-- Maximum **5–8 strategies** total to fit within the 1-week campaign window.
+- **No artificial limit** on total strategies. `batch_size` controls first-batch launch count only.
 - Vary power schedules (`-p`) across strategies: `explore`, `rare`, `fast`, `coe`.
 - Different strategies that need different seed formats should use different seed directories.
 
 ### Generate Fuzz Command Manifest
 
 **必须**直接从 `command_combinations.json` 和 `vulnerability_path_scores.md` 映射生成。manifest 中的每条策略对应 analysis 中的一个组合，禁止凭空编造。
+
+### ⚠️ 硬性规则：禁止丢弃 analysis 中的命令行参数
+
+manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组合的**所有参数**。输入文件替换为 `@@`，输出文件替换为 `/dev/null`，其余一个不能少。
+
+**错误示例（高风险参数被丢弃）：**
+```
+analysis:  <tool> -F<flag> -M<param> -v -o out.gv in.gv
+manifest:  <tool> -v -o /dev/null @@
+                 ^^^^^^ 丢了 -F 和 -M！而 analysis 里明确标注了这些参数有 CWE 风险
+```
+
+analysis 中每个参数旁边都标注了 CWE 类型和风险分数。丢掉一个参数 = 丢掉一个被标记的攻击面。有些漏洞只通过特定参数才能触发（如数字解析类 CWE-190 只出现在特定数值参数上）。
+
+**生成 manifest 后，逐条做 self-check：**
+```
+analysis command:  <tool> -F<flag> -M<param> -v -o out.gv in.gv
+manifest command:  afl-fuzz ... -- $PROJ/<tool> -F<flag> -M<param> -v -o /dev/null @@
+check:            所有参数保留？✅ 只有输入文件换成了 @@，输出换成了 /dev/null
+```
 
 映射规则：
 
@@ -304,7 +323,7 @@ done
 # 映射为 manifest 条目:
 #   "id": 5
 #   "name": "single_file_full_debug"
-#   "command": "afl-fuzz -M main -i seeds -o out_id5 -m 4096 -t 10000 -p explore -- $PROJ/uncrustify -c CFG -f @@ -o /dev/null -p /dev/null"
+#   "command": "afl-fuzz -M main -i seeds -o out_id5 -m 4096 -t 10000 -p explore -- $PROJ/<target> -c CFG -f @@ -o /dev/null -p /dev/null"
 #   "vuln_score": 78
 #   "priority": "critical"
 
@@ -315,18 +334,18 @@ cat > fuzz_manifest.json << 'EOF'
     {
       "id": 5,
       "name": "single_file_full_debug",
-      "command": "afl-fuzz ... -- $PROJ/target -c CFG -f @@ -o OUT -p DUMP",
+      "command": "afl-fuzz -M main -i seeds -o out_id5 -m 4096 -t 10000 -p explore -- $PROJ/<target> -c CFG -f @@ -o /dev/null -p /dev/null",
       "vuln_score": 78,
       "priority": "critical",
-      "desc": "从 analysis Rank 1 映射"
+      "desc": "从 analysis Rank 1 映射: <target> -c CFG -f FILE -o OUT -p DUMP — 全覆盖参数组合"
     },
     {
       "id": 9,
       "name": "check_mode",
-      "command": "afl-fuzz ... -- $PROJ/target -c CFG -f @@ --check",
+      "command": "afl-fuzz -S fuzzer2 -i seeds -o out_id9 -m 4096 -t 10000 -p rare -- $PROJ/<target> -c CFG -f @@ --check",
       "vuln_score": 63,
       "priority": "high",
-      "desc": "从 analysis Rank 2 映射"
+      "desc": "从 analysis Rank 2 映射: <target> -c CFG -f FILE --check — check 模式"
     }
   ]
 }
