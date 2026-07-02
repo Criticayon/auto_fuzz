@@ -248,17 +248,19 @@ done
 
 按 `vulnerability_path_scores.md` 的分数排序确定优先级，高分组合优先 fuzz、给更多实例。
 
-### 策略选择原则：尽量多保留
+### 策略选择原则：只过滤低分
 
-**保留绝大部分策略，不要设人工上限。** 只过滤掉分数过低、几乎没有挖掘价值的组合（如 score < 20 且仅有 CWE-20 类风险）。
+**把所有有评分的组合都生成策略，只过滤分数过低的。** 前端 Web UI 会展示所有策略让用户勾选，manifest 只需要提供完整选项。
 
 选择流程：
-1. 从 `command_combinations.json` 的 `tools[]` 数组遍历，每个工具的所有组合
-2. 覆盖所有工具，每个工具至少选 **1 个最高分组合**
-3. 然后保留其余分数足够高的组合（包括同一工具的不同参数组合）
-4. 最终 manifest 保留全部有效策略，`batch_size` 表示第一批启动多少，后续策略等在后续批次中启动
 
-（如果vulnerability_path_scores.md没有对应命令分数也需要进行尝试，这不是一个紧急的任务，我们希望的是覆盖尽可能高有助于挖出漏洞）
+1. 遍历 vulnerability_path_scores.md 中 score ≥ 20 的所有工具的**所有 Rank**
+2. 每条组合都生成一条策略
+3. 为最高分的 1-2 个工具各加一条 CMPLOG variant
+4. 不同工具/不同参数组合的策略要不同 `output_dir`（避免冲突）
+5. `batch_size` 设为 4（前端会过滤，实际第一批由用户选择的数量决定）
+
+（如果 vulnerability_path_scores.md 没有对应命令分数也需要进行尝试，这不是一个紧急的任务，我们希望的是覆盖尽可能高有助于挖出漏洞）
 
 ### Strategy design principles
 
@@ -274,12 +276,11 @@ done
 | CMPLOG variant | — | Add a CMPLOG strategy for magic byte bypass |
 
 **Rules:**
-- **First pass:** cover each distinct CLI tool/entry point with at least one strategy.
-- **Second pass:** keep remaining strategies — do NOT cap the total count. Only drop strategies with very low scores (e.g. < 20 and no interesting CWE).
-- Include a **CMPLOG strategy** whenever a CMPLOG binary was built. Apply it to the highest-prio tool.
-- **No artificial limit** on total strategies. `batch_size` controls first-batch launch count only.
+- **覆盖所有组合**：遍历 vulnerability_path_scores.md 中的所有工具和 Rank，score ≥ 20 的组合都生成策略。不要遗漏，不要自创。
+- **CMPLOG 策略**：为评分最高的 1-2 个工具各加一条 CMPLOG variant。
 - Vary power schedules (`-p`) across strategies: `explore`, `rare`, `fast`, `coe`.
-- Different strategies that need different seed formats should use different seed directories.
+- Different strategies that need different seed formats should use separate seed directories.
+- 分数太低的过滤掉就行（< 20），其他的全部保留让前端用户选择。
 
 ### Generate Fuzz Command Manifest
 
