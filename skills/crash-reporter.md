@@ -13,9 +13,76 @@ After an AFL++ fuzzing campaign completes, this skill collects crashes from all 
 
 ---
 
+## Phase 0: Build ASAN Binary for Crash Reproduction
+
+Crash reproduction requires an ASAN-instrumented binary. First check if one already exists; only rebuild if needed.
+
+### Step 1: Load project info
+
+```bash
+source target_metadata.sh
+echo "PROJ=$PROJ BUILD_DIR=$BUILD_DIR COMMIT_HASH=$COMMIT_HASH"
+```
+
+### Step 2: Check for existing ASAN binary
+
+Look for ASAN symbols in the existing binary. If available and has ASAN, skip the build:
+
+```bash
+# Check if existing binary has ASAN instrumentation
+if [ -f "${PROJ}/build_afl/bin/gvpack" ] && nm "${PROJ}/build_afl/bin/gvpack" 2>/dev/null | grep -q __asan; then
+  echo "ASAN binary already exists, skipping build"
+  # Still record BUILD_CMD if not already set
+else
+  echo "No ASAN binary found, building..."
+fi
+```
+Adjust the binary name (`gvpack` above is just an example) to match the actual target being analyzed.
+
+### Step 3: Build with ASAN (if needed)
+
+If no ASAN binary exists, rebuild. Use the same build system as the original project:
+
+```bash
+cd $PROJ
+mkdir -p build_asan
+cd build_asan
+
+export AFL_USE_ASAN=1
+CC=afl-clang-fast \
+CXX=afl-clang-fast++ \
+cmake .. \
+  -DCMAKE_C_COMPILER=afl-clang-fast \
+  -DCMAKE_CXX_COMPILER=afl-clang-fast++
+
+make -j$(nproc)
+```
+
+> **重要:** 对于 cmake 项目，`-DCMAKE_C_COMPILER` 和 `-DCMAKE_CXX_COMPILER` 写入 CMakeCache.txt 后重新 cmake 时无需重复指定。但 `AFL_USE_ASAN=1` 环境变量必须每次都 export。
+
+### Step 4: Record build commands
+
+After ensuring an ASAN binary exists, save the exact build commands to `target_metadata.sh` so issue-generator can reference them:
+
+```bash
+# Append build commands to target_metadata.sh
+cat >> target_metadata.sh << 'BUILDCMD'
+
+# Build commands used for ASAN crash reproduction
+BUILD_CMD='CC=afl-clang-fast CXX=afl-clang-fast++ cmake .. -DCMAKE_C_COMPILER=afl-clang-fast -DCMAKE_CXX_COMPILER=afl-clang-fast++ && make -j$(nproc)'
+BUILDCMD
+```
+
+Fill in the exact cmake/configure command used. Include all flags and options. If the ASAN binary already existed and you skipped the rebuild, set `BUILD_CMD` to the command that was historically used.
+
+**Rule:** The `BUILD_CMD` value must be a valid shell command string that can be pasted directly into an issue's Build Configuration section.
+
+---
+
 ## Workflow Overview
 
 ```
+Phase 0: Build ASAN       → Rebuild target with ASAN, record build commands to target_metadata.sh
 Phase 1: Collect Crashes  → Gather crash inputs from all out_*/crashes/
 Phase 2: Reproduce & Dedupe → ASAN reproduce, dedup by (ASAN error type + src file:line), count instances in memory
 Phase 3: Analyze & Save   → Full ASAN output per unique crash, save PoC + reproduce.sh with count comment

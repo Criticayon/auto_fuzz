@@ -207,6 +207,10 @@ fi
 if [ -z "${REPORT_DATE:-}" ]; then
   REPORT_DATE=$(grep "date\|Date" reports/SUMMARY.md 2>/dev/null | sed 's/.*|//' | head -1 | xargs)
 fi
+# BUILD_CMD is optional — if set, use it in the issue's Build Configuration
+if [ -n "${BUILD_CMD:-}" ]; then
+  echo "[config] using recorded build command: $BUILD_CMD"
+fi
 ```
 
 Issue file template (in English) — generate one file per crash type, following this exact format:
@@ -231,6 +235,9 @@ ASAN reports indicate: [specific ASAN finding, e.g., reads past allocated region
 ---
 
 ## Build Configuration
+
+Source `target_metadata.sh`. If `$BUILD_CMD` is set, use it verbatim as the Build Configuration code block. Otherwise fall back to the generic template below:
+
 ```bash
 build() {
   export AFL_USE_ASAN=1
