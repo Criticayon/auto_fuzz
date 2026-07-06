@@ -393,7 +393,7 @@ async def api_manifest_select(target: str, strategy_ids: str = ""):
         return {"error": "fuzz_manifest.json not found"}
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        ids = [int(i) for i in strategy_ids.split(",") if i.strip()]
+        ids = [i.strip() for i in strategy_ids.split(",") if i.strip()]
         selected = [s for s in data["strategies"] if s["id"] in ids]
         selected_data = {"batch_size": len(selected), "strategies": selected}
         sel_path = BASE_DIR / "outputs" / target / "fuzz_manifest_selected.json"
