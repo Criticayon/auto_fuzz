@@ -298,11 +298,13 @@ async def api_phase_clean(target: str, phase: int):
         return {"status": "cleaned", "phase": 2, "target": project_name}
 
     elif phase == 3:
+        # Phase 3: 只清理 fuzz 输出（out_* 目录），保留预处理产物
         docker_exec(
             f"ps aux | grep afl-fuzz | grep '{project_name}' | grep -v grep "
             f"| awk '{{print $2}}' | xargs -r kill -9 2>/dev/null || true"
         )
-        docker_exec(f"rm -rf /workspace/fuzz_{project_name} 2>/dev/null || true")
+        docker_exec(f"rm -rf /workspace/fuzz_{project_name}/out_* 2>/dev/null || true")
+        docker_exec(f"rm -f /workspace/fuzz_{project_name}/fuzz_started.signal 2>/dev/null || true")
         p = host_dir / "killed_strategies.json"
         if p.exists(): p.unlink()
         return {"status": "cleaned", "phase": 3, "target": project_name}
