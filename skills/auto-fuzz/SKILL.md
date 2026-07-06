@@ -235,60 +235,42 @@ done
 
 ## Phase 3: Fuzzing Strategy Design
 
-结合 Phase 2 加载的分析结果和以下通用原则设计策略。
+### ⚠️ 你必须在开始前严格执行以下步骤
 
-### 从 command_combinations.json 构建策略
+**Step 1 — 写 `fuzz_tool_list.md`**（必须先做，不能跳过）
 
-将每个命令组合中的输入文件占位符替换为 AFL 的 `@@`，辅助文件保留原路径。
+打开 `vulnerability_path_scores.md`，提取所有 `## Tool N: xxx` 标题中的工具名及其 Rank/Score，写入 `fuzz_tool_list.md`：
 
-| 分析输出的命令 | → | Fuzz 命令 |
-|---------------|----|-----------|
-| `["prog", "-V", "-m", "<file>", "-p", "<pub>"]` | → | `afl-fuzz ... -- ./prog -V -m @@ -p <pub>` |
-| `["prog", "-S", "-m", "<file>"]` | → | `afl-fuzz ... -- ./prog -S -m @@` |
+```
+# Tools to cover
+- Tool 1: <name>  — Rank 1 (score: N), Rank 2 (score: M), ...
+- Tool 2: <name>  — Rank 1 (score: N) → 全部 < 20, skip
+- Tool 3: <name>  — Rank 1 (score: N), Rank 2 (score: M), ...
+```
 
-按 `vulnerability_path_scores.md` 的分数排序确定优先级，高分组合优先 fuzz、给更多实例。
+**Step 2 — 遍历 `fuzz_tool_list.md` 生成策略**
 
-### 策略选择原则：只过滤低分
+逐工具、逐 Rank 遍历。对每个 score ≥ 20 的 Rank，生成一条独立策略。同一个工具的多个 Rank 产出多条独立策略，不允许合并。
 
-**把所有有评分的组合都生成策略，只过滤分数过低的。** 前端 Web UI 会展示所有策略让用户勾选，manifest 只需要提供完整选项。
+**Step 3 — 写 `manifest_selfcheck.md`**
 
-选择流程：
+生成 manifest 后，立即打开 `fuzz_tool_list.md`，逐条核对结果写入 `manifest_selfcheck.md`：
 
-1. 遍历 vulnerability_path_scores.md 中 score ≥ 20 的所有工具的**所有 Rank**
-2. 每条组合都生成一条策略
-3. 为最高分的 1-2 个工具各加一条 CMPLOG variant
-4. 不同工具/不同参数组合的策略要不同 `output_dir`（避免冲突）
-5. `batch_size` 设为 4（前端会过滤，实际第一批由用户选择的数量决定）
+| Tool | Rank | Score | In Manifest? | Command Complete? | Params Match? |
+|------|------|-------|-------------|-------------------|---------------|
+| <t1> | 1 | 82 | ✅ id:x | ✅ | ✅ |
+| <t2> | 1 | 20 | ✅ id:y | ✅ | ✅ |
+| <t3> | 1 | 72 | ⚠️ 遗漏 | — | — |
 
-（如果 vulnerability_path_scores.md 没有对应命令分数也需要进行尝试，这不是一个紧急的任务，我们希望的是覆盖尽可能高有助于挖出漏洞）
+**如果发现遗漏，必须补上。不允许跳过此步骤。**
 
-### Strategy design principles
+Step 1-3 完成后，再阅读下方参考内容调整策略细节。
 
-| Code Pattern Found | Likely Function | Fuzzing Strategy |
-|---|---|---|
-| JPEG/PNG decoder | `read_jpeg()`, `decode_png()` | Fuzz with `--format=jpeg @@` using image seeds |
-| XML/JSON/INI parser | `parse_config()`, `load_config()` | Fuzz config file via `--config @@` |
-| Network protocol handler | `handle_packet()`, `process_msg()` | Fuzz binary input via `@@` |
-| Expression evaluator | `eval()`, `exec_expression()` | Fuzz with `--eval @@` subcommand |
-| Template engine | `render()`, `compile_template()` | Fuzz with `--template @@` flag |
-| Compression codec | `compress()` / `decompress()` | Fuzz both `compress @@` and `decompress @@` |
-| Multiple format support | `read_image()` dispatching by type | One strategy per format |
-| CMPLOG variant | — | Add a CMPLOG strategy for magic byte bypass |
+---
 
-**Rules:**
-- **覆盖所有组合**：遍历 vulnerability_path_scores.md 中的所有工具和 Rank，score ≥ 20 的组合都生成策略。不要遗漏，不要自创。
-- **CMPLOG 策略**：为评分最高的 1-2 个工具各加一条 CMPLOG variant。
-- Vary power schedules (`-p`) across strategies: `explore`, `rare`, `fast`, `coe`.
-- Different strategies that need different seed formats should use separate seed directories.
-- 分数太低的过滤掉就行（< 20），其他的全部保留让前端用户选择。
+### 策略参数规则
 
-### Generate Fuzz Command Manifest
-
-**必须**直接从 `command_combinations.json` 和 `vulnerability_path_scores.md` 映射生成。manifest 中的每条策略对应 analysis 中的一个组合，禁止凭空编造。
-
-### ⚠️ 硬性规则：禁止丢弃 analysis 中的命令行参数
-
-manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组合的**所有参数**。输入文件替换为 `@@`，输出文件替换为 `/dev/null`，其余一个不能少。
+manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组合的**所有参数**。输入文件替换为 `@@`，输出文件替换为 `/dev/null`，其余**一个不能少，一个不能改**。
 
 **错误示例（高风险参数被丢弃）：**
 ```
@@ -297,14 +279,86 @@ manifest:  <tool> -v -o /dev/null @@
                  ^^^^^^ 丢了 -F 和 -M！而 analysis 里明确标注了这些参数有 CWE 风险
 ```
 
+**常见错误：模型倾向"简化"命令，丢掉看似"不重要"的 flag。这是不允许的。** 以下都是真实发生过的错误：
+
+```
+错误 1（丢掉 flag）：
+  analysis:  <tool> -a -b -c -d <path>
+  manifest:  <tool> @@                      ← 丢了 -a -b -c -d，完全改变了行为
+
+错误 2（丢掉文件路径参数）：
+  analysis:  <tool> -s <mode> -b <fmt> -n -a <hex> -d <float> <file>
+  manifest:  <tool> @@                  ← 丢了 -s -b -n -a -d，只测了默认路径
+
+错误 3（只留了工具名，丢掉所有选项）：
+  analysis:  <tool> -c -k -l <N> -d <float> -p <path> -J <out> <arg>
+  manifest:  <tool> @@            ← 所有选项都没了！
+```
+
 analysis 中每个参数旁边都标注了 CWE 类型和风险分数。丢掉一个参数 = 丢掉一个被标记的攻击面。有些漏洞只通过特定参数才能触发（如数字解析类 CWE-190 只出现在特定数值参数上）。
 
-**生成 manifest 后，逐条做 self-check：**
+### 分数→优先级映射规则
+
+priority 字段必须按 vuln_score 严格映射，不能随意填写：
+
+| vuln_score 范围 | priority |
+|----------------|----------|
+| ≥ 80 | critical |
+| ≥ 60 | high |
+| ≥ 40 | medium |
+| ≥ 20 | low |
+| < 20 | 不生成策略 |
+
+**示例：**
+- score 82 → `"priority": "critical"`
+- score 72 → `"priority": "high"`
+- score 55 → `"priority": "medium"`（不是 critical！）
+- score 22 → `"priority": "low"`
+
+**生成 manifest 后，必须逐条做 self-check：**
 ```
-analysis command:  <tool> -F<flag> -M<param> -v -o out.gv in.gv
-manifest command:  afl-fuzz ... -- $PROJ/<tool> -F<flag> -M<param> -v -o /dev/null @@
-check:            所有参数保留？✅ 只有输入文件换成了 @@，输出换成了 /dev/null
+analysis command:  <tool> -a <file> -b -c <out> <in>
+manifest command:  afl-fuzz ... -- <tool> -a @@ -b -c /dev/null @@
+check:            所有参数保留？✅
 ```
+
+**最后输出 `manifest_selfcheck.md` 自检清单文件：**
+
+打开 `fuzz_tool_list.md`，逐个工具、逐个 Rank 检查，把结果写入 `manifest_selfcheck.md`：
+
+```markdown
+# Manifest Self-Check
+
+## Tool 1: <tool1_name>
+| Rank | Score | In Manifest? | Command Complete? | Params Match? |
+|------|-------|-------------|-------------------|---------------|
+| 1 | 82 | ✅ id:xxx | ✅ | ✅ |
+| 2 | 55 | ✅ id:yyy | ✅ | ✅ |
+
+## Tool 2: <tool2_name>
+| Rank | Score | In Manifest? | Command Complete? | Params Match? |
+|------|-------|-------------|-------------------|---------------|
+| 1 | 20 | ✅ id:zzz | ✅ | ✅ |
+
+## Tool 3: <tool3_name>
+| Rank | Score | In Manifest? | Command Complete? | Params Match? |
+|------|-------|-------------|-------------------|---------------|
+| 1 | 72 | ✅ id:aaa | ✅ | ✅ |
+| 2 | 65 | ✅ id:bbb | ✅ | ✅ |
+| 3 | 40 | ✅ id:ccc | ✅ | ✅ |
+
+---
+
+**汇总：**
+- 工具覆盖：3/3 ✅  所有 score ≥ 20 的工具都有策略
+- Rank 覆盖：6/7 ⚠️  遗漏 1 个 Rank（score=20），补上
+- 命令参数完整性：抽查 3 条，全部完整 ✅
+```
+
+**检查规则：**
+- 每个工具至少有一条策略？（score 全部 < 20 的可跳过）
+- 策略命令与 analysis 原始命令参数数量和内容完全一致？
+- manifest 中没有自创/编造的命令？
 
 映射规则：
 

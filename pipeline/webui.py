@@ -289,12 +289,11 @@ async def api_phase_clean(target: str, phase: int):
         return {"status": "cleaned", "phase": 1, "target": project_name}
 
     elif phase == 2:
-        for f in ["fuzz_manifest.json", "fuzz_manifest_selected.json", "fuzz_manifest_select.json", "seeds"]:
+        for f in ["fuzz_manifest.json", "fuzz_manifest_selected.json", "fuzz_manifest_select.json", "seeds", "target_metadata.sh"]:
             p = host_dir / f
             if p.is_dir(): shutil.rmtree(str(p))
             elif p.exists(): p.unlink()
-        docker_exec(f"rm -rf /workspace/{project_name}/build 2>/dev/null || true")
-        docker_exec(f"rm -f /workspace/fuzz_{project_name}/seeds* /workspace/fuzz_{project_name}/fuzz_manifest* 2>/dev/null || true")
+        docker_exec(f"rm -rf /workspace/{project_name}/build* /workspace/fuzz_{project_name}/seeds* /workspace/fuzz_{project_name}/*.dict /workspace/fuzz_{project_name}/fuzz_manifest* /workspace/fuzz_{project_name}/target_metadata.sh /workspace/fuzz_{project_name}/fuzz_tool_list.md /workspace/fuzz_{project_name}/manifest_selfcheck.md 2>/dev/null || true")
         return {"status": "cleaned", "phase": 2, "target": project_name}
 
     elif phase == 3:

@@ -79,6 +79,10 @@ Fill in the exact cmake/configure command used. Include all flags and options. I
 
 ---
 
+## Phase 1: Collect Crashes
+
+---
+
 ## Workflow Overview
 
 ```

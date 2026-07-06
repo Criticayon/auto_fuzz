@@ -60,11 +60,11 @@ SKILLS_TARGET="${HOME}/.claude/skills"
 SKILLS_SRC="${SCRIPT_DIR}/skills"
 
 SKILLS_LIST=(
-    "program-analysis:program-analysis.md"
-    "auto-fuzz:auto-fuzz.md"
-    "auto-fuzz-exec:auto-fuzz-exec.md"
-    "crash-reporter:crash-reporter.md"
-    "issue-generator:issue-generator.md"
+    "program-analysis:program-analysis/SKILL.md"
+    "auto-fuzz:auto-fuzz/SKILL.md"
+    "auto-fuzz-exec:auto-fuzz-exec/SKILL.md"
+    "crash-reporter:crash-reporter/SKILL.md"
+    "issue-generator:issue-generator/SKILL.md"
 )
 
 echo "  Skills will be installed to: ${SKILLS_TARGET}/"
