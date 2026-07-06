@@ -942,12 +942,15 @@ async function loadManifest() {
     count.textContent = `${d.strategies.length} available (batch_size=${d.batch_size||4})`;
     list.innerHTML = d.strategies.map(s => {
       const wasChecked = prevChecked.has(String(s.id));
+      const p = s.priority||'medium';
+      const pBg = {critical:'#e1e4e8', high:'#ffebe9', medium:'#fff8c5'}[p]||'#fff8c5';
+      const pFg = {critical:'#000000', high:'#cf222e', medium:'#9a6700'}[p]||'#9a6700';
       return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;">
         <input type="checkbox" class="strategy-cb" value="${s.id}" ${wasChecked?'checked':''} onchange="updateSelectAll()" style="margin-top:3px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <strong style="font-size:14px;">${s.name||'id_'+s.id}</strong>
-            <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:${s.priority==='critical'?'#ffebe9':'#fff8c5'};color:${s.priority==='critical'?'#cf222e':'#9a6700'};">${s.priority||'medium'}</span>
+            <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:${pBg};color:${pFg};">${p}</span>
             <span style="font-size:11px;color:#656d76;">score: ${s.vuln_score||'?'}</span>
           </div>
           <div style="font-family:'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace;font-size:12px;color:#24292f;background:#ffffff;padding:8px 12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;line-height:1.5;">${s.command||'N/A'}</div>

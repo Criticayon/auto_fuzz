@@ -9,7 +9,7 @@ metadata:
 
 # Auto-Fuzz: Automated AFL++ Vulnerability Discovery
 
-An automated fuzzing pre-processor. Given a target project, this skill compiles it with AFL++ instrumentation, analyzes source code to design targeted fuzzing strategies, generates seed corpora, and produces a fuzz_manifest.json defining all strategies.
+An automated end-to-end fuzzing workflow. Given a target project, this skill compiles it with AFL++ instrumentation, analyzes source code to design targeted fuzzing strategies, generates seed corpora, runs parallel multi-strategy fuzzing campaigns with stagnation detection, and produces crash triage results.
 
 ---
 
@@ -19,8 +19,19 @@ An automated fuzzing pre-processor. Given a target project, this skill compiles 
 Phase 1: Compile         → Build target with AFL++ + sanitizers
 Phase 2: Load Analysis   → Read 4 analysis files from program-analysis skill
 Phase 3: Strategy Design → Convert command combos → fuzz strategies, priority by vuln score
-Phase 4: Corpus Gen      → Extract seeds from tests / generate minimal corpus, output fuzz_manifest.json
+Phase 4: Corpus Gen      → Extract seeds from tests / generate minimal corpus
+Phase 5: Campaign        → Run strategies in batches of 3-4 in parallel, each in own output dir
+Phase 6: Cleanup         → Stop all afl-fuzz for this project, signal completion
 ```
+
+### ⏰ Deadline Awareness
+
+The pipeline passes a **deadline** in the prompt (e.g., "Total fuzzing deadline: 24.0 hours from now"). You must:
+
+1. **Plan backwards from the deadline.** Estimate time needed for: compilation → strategy design → corpus gen → campaign → cleanup.
+2. **Reserve the last 5 minutes** for cleanup: stopping afl-fuzz processes and signaling completion.
+3. **If you run out of time**, skip remaining batches and proceed directly to Phase 6 (Cleanup). Do NOT leave afl-fuzz processes running.
+4. **Track elapsed time** periodically during the campaign phase. If you're approaching the deadline, stop fuzzing and clean up.
 
 ---
 
@@ -235,36 +246,67 @@ done
 
 ## Phase 3: Fuzzing Strategy Design
 
-### ⚠️ 你必须在开始前严格执行以下步骤
+### ⚠️ 你必须按以下步骤严格执行，不能跳过任何一步
 
-**Step 1 — 写 `fuzz_tool_list.md`**（必须先做，不能跳过）
+**Step 1 — 用 bash 写 `fuzz_tool_list.md`（必须先做，容器 + 宿主机双写）**
 
-打开 `vulnerability_path_scores.md`，提取所有 `## Tool N: xxx` 标题中的工具名及其 Rank/Score，写入 `fuzz_tool_list.md`：
+用 bash（container_exec）读取 `vulnerability_path_scores.md`，提取所有 `## Tool N: xxx` 标题中的工具名及其 Rank/Score。先写入容器，再用 Write 工具写入宿主机：
 
-```
+```bash
+# 写入容器（fuzz workspace 目录）
+cat > /workspace/fuzz_<project>/fuzz_tool_list.md << 'EOF'
 # Tools to cover
-- Tool 1: <name>  — Rank 1 (score: N), Rank 2 (score: M), ...
-- Tool 2: <name>  — Rank 1 (score: N) → 全部 < 20, skip
-- Tool 3: <name>  — Rank 1 (score: N), Rank 2 (score: M), ...
+- Tool 1: <name> — Rank 1 (score: N), Rank 2 (score: M), ...
+- Tool 2: <name> — Rank 1 (score: N) → 全部 < 20, skip
+- Tool 3: <name> — Rank 1 (score: N), Rank 2 (score: M), ...
+EOF
+cat /workspace/fuzz_<project>/fuzz_tool_list.md
 ```
+
+然后再用 Write 工具（或宿主机 bash）写入 **宿主机当前目录**（即 pipeline 的工作目录，./fuzz_tool_list.md）。
+
+**此文件必须覆盖 vulnerability_path_scores.md 中所有的工具，每个工具至少出现一次，一个都不能少。**
 
 **Step 2 — 遍历 `fuzz_tool_list.md` 生成策略**
 
 逐工具、逐 Rank 遍历。对每个 score ≥ 20 的 Rank，生成一条独立策略。同一个工具的多个 Rank 产出多条独立策略，不允许合并。
 
-**Step 3 — 写 `manifest_selfcheck.md`**
+**禁止在生成策略前自行测试工具是否能运行。** 所有工具统一使用 `TERM=xterm-256color` + `AFL_NO_FORKSRV=1` 处理终端依赖问题，不需要提前测试。
 
-生成 manifest 后，立即打开 `fuzz_tool_list.md`，逐条核对结果写入 `manifest_selfcheck.md`：
+**Step 3 — 用 bash 写 `manifest_selfcheck.md`（容器 + 宿主机双写）**
 
-| Tool | Rank | Score | In Manifest? | Command Complete? | Params Match? |
-|------|------|-------|-------------|-------------------|---------------|
-| <t1> | 1 | 82 | ✅ id:x | ✅ | ✅ |
-| <t2> | 1 | 20 | ✅ id:y | ✅ | ✅ |
-| <t3> | 1 | 72 | ⚠️ 遗漏 | — | — |
+生成 manifest 后，立即先写入容器，再用 Write 工具写入宿主机。**如果有任何 score ≥ 20 的 Rank 没有被包含在 manifest 中，必须在"Excluded Reason"列说明原因（如：该工具 command_combinations.json 中没有可 fuzz 的 file 类型参数，或所有参数都是内部路径不可替换为 @@）。不允许无故跳过。**
+
+```bash
+# 写入容器
+cat > /workspace/fuzz_<project>/manifest_selfcheck.md << 'EOF'
+# Manifest Self-Check
+
+## Tool 1: <name>
+| Rank | Score | In Manifest? | Command Complete? | Params Match? | Excluded Reason |
+|------|-------|-------------|-------------------|---------------|-----------------|
+| 1 | 82 | ✅ id:xxx | ✅ | ✅ | — |
+| 2 | 55 | ✅ id:yyy | ✅ | ✅ | — |
+| 3 | 20 | ❌ 遗漏 | — | — | 该组合无文件输入参数，所有参数为内部路径 |
+
+## Tool 2: <name>
+| Rank | Score | In Manifest? | Command Complete? | Params Match? | Excluded Reason |
+|------|-------|-------------|-------------------|---------------|-----------------|
+| 1 | 22 | ✅ id:zzz | ✅ | ✅ | — |
+
+---
+
+**汇总：**
+- 工具覆盖：N/M （score ≥ 20 的工具应有策略数 / 实际策略数）
+- 被排除的工具/组合：列出原因
+- 命令参数完整性：抽查 N 条，全部完整 ✅
+EOF
+cat /workspace/fuzz_<project>/manifest_selfcheck.md
+```
+
+再用 Write 工具（或宿主机 bash）写入 **宿主机当前目录**（./manifest_selfcheck.md）。
 
 **如果发现遗漏，必须补上。不允许跳过此步骤。**
-
-Step 1-3 完成后，再阅读下方参考内容调整策略细节。
 
 ---
 
@@ -272,14 +314,7 @@ Step 1-3 完成后，再阅读下方参考内容调整策略细节。
 
 manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组合的**所有参数**。输入文件替换为 `@@`，输出文件替换为 `/dev/null`，其余**一个不能少，一个不能改**。
 
-**错误示例（高风险参数被丢弃）：**
-```
-analysis:  <tool> -F<flag> -M<param> -v -o out.gv in.gv
-manifest:  <tool> -v -o /dev/null @@
-                 ^^^^^^ 丢了 -F 和 -M！而 analysis 里明确标注了这些参数有 CWE 风险
-```
-
-**常见错误：模型倾向"简化"命令，丢掉看似"不重要"的 flag。这是不允许的。** 以下都是真实发生过的错误：
+**常见错误：模型倾向"简化"命令，丢掉看似"不重要"的 flag。这是不允许的。**
 
 ```
 错误 1（丢掉 flag）：
@@ -294,8 +329,6 @@ manifest:  <tool> -v -o /dev/null @@
   analysis:  <tool> -c -k -l <N> -d <float> -p <path> -J <out> <arg>
   manifest:  <tool> @@            ← 所有选项都没了！
 ```
-
-analysis 中每个参数旁边都标注了 CWE 类型和风险分数。丢掉一个参数 = 丢掉一个被标记的攻击面。有些漏洞只通过特定参数才能触发（如数字解析类 CWE-190 只出现在特定数值参数上）。
 
 ### 分数→优先级映射规则
 
@@ -315,97 +348,39 @@ priority 字段必须按 vuln_score 严格映射，不能随意填写：
 - score 55 → `"priority": "medium"`（不是 critical！）
 - score 22 → `"priority": "low"`
 
-**生成 manifest 后，必须逐条做 self-check：**
-```
-analysis command:  <tool> -a <file> -b -c <out> <in>
-manifest command:  afl-fuzz ... -- <tool> -a @@ -b -c /dev/null @@
-check:            所有参数保留？✅
-```
+### Generate Fuzz Command Manifest
 
-**最后输出 `manifest_selfcheck.md` 自检清单文件：**
+**必须**直接从 `command_combinations.json` 和 `vulnerability_path_scores.md` 映射生成。manifest 中的每条策略对应 analysis 中的一个组合，禁止凭空编造。
 
-打开 `fuzz_tool_list.md`，逐个工具、逐个 Rank 检查，把结果写入 `manifest_selfcheck.md`：
+每条策略是一个独立对象，放在 `strategies[]` 数组中。**不允许用 `secondary_commands` 或类似字段把多个策略合并到一条里。**
 
-```markdown
-# Manifest Self-Check
+**manifest 的条目数量 = score ≥ 20 的 Rank 总数。** 如果 vulnerability_path_scores.md 中有 12 个 Rank ≥ 20，manifest 必须有 12 条策略。
 
-## Tool 1: <tool1_name>
-| Rank | Score | In Manifest? | Command Complete? | Params Match? |
-|------|-------|-------------|-------------------|---------------|
-| 1 | 82 | ✅ id:xxx | ✅ | ✅ |
-| 2 | 55 | ✅ id:yyy | ✅ | ✅ |
+manifest JSON 语法参考（仅展示结构，条目数量根据实际 analysis 决定）：
 
-## Tool 2: <tool2_name>
-| Rank | Score | In Manifest? | Command Complete? | Params Match? |
-|------|-------|-------------|-------------------|---------------|
-| 1 | 20 | ✅ id:zzz | ✅ | ✅ |
-
-## Tool 3: <tool3_name>
-| Rank | Score | In Manifest? | Command Complete? | Params Match? |
-|------|-------|-------------|-------------------|---------------|
-| 1 | 72 | ✅ id:aaa | ✅ | ✅ |
-| 2 | 65 | ✅ id:bbb | ✅ | ✅ |
-| 3 | 40 | ✅ id:ccc | ✅ | ✅ |
-
----
-
-**汇总：**
-- 工具覆盖：3/3 ✅  所有 score ≥ 20 的工具都有策略
-- Rank 覆盖：6/7 ⚠️  遗漏 1 个 Rank（score=20），补上
-- 命令参数完整性：抽查 3 条，全部完整 ✅
-```
-
-**检查规则：**
-- 每个工具至少有一条策略？（score 全部 < 20 的可跳过）
-- 策略命令与 analysis 原始命令参数数量和内容完全一致？
-- manifest 中没有自创/编造的命令？
-
-映射规则：
-
-| 分析文件 | manifest 字段 |
-|---------|--------------|
-| `command_combinations.json` 中的 `command` | 将输入文件替换为 `@@`，其余不变，拼成完整 afl-fuzz 命令 |
-| `vulnerability_path_scores.md` 中的排名 | 按分数从高到低排序，写入 `batch_size: 4` 分批 |
-| `vulnerability_path_scores.md` 中的 `Rank N: xxx (id=M)` | `name` = 组合名，`id` = 组合编号 |
-
-```bash
-# 从 analysis 文件逐条映射，禁止自创内容
-# 例如 command_combinations.json 中有条目:
-#   {"id": 5, "command": ["uncrustify", "-c", "CFG", "-f", "FILE", "-o", "OUT", "-p", "DUMP", "-ds", "STEPS", "-l", "CPP", "--set", "indent_width=4"]}
-#  vulnerability_path_scores.md 中对应:
-#   "Rank 1: Single file + full debug (id=5) — Score: 78"
-#
-# 映射为 manifest 条目:
-#   "id": 5
-#   "name": "single_file_full_debug"
-#   "command": "afl-fuzz -M main -i seeds -o out_id5 -m 4096 -t 10000 -p explore -- $PROJ/<target> -c CFG -f @@ -o /dev/null -p /dev/null"
-#   "vuln_score": 78
-#   "priority": "critical"
-
-cat > fuzz_manifest.json << 'EOF'
+```json
 {
   "batch_size": 4,
   "strategies": [
     {
-      "id": 5,
-      "name": "single_file_full_debug",
-      "command": "afl-fuzz -M main -i seeds -o out_id5 -m 4096 -t 10000 -p explore -- $PROJ/<target> -c CFG -f @@ -o /dev/null -p /dev/null",
-      "vuln_score": 78,
-      "priority": "critical",
-      "desc": "从 analysis Rank 1 映射: <target> -c CFG -f FILE -o OUT -p DUMP — 全覆盖参数组合"
-    },
-    {
-      "id": 9,
-      "name": "check_mode",
-      "command": "afl-fuzz -S fuzzer2 -i seeds -o out_id9 -m 4096 -t 10000 -p rare -- $PROJ/<target> -c CFG -f @@ --check",
-      "vuln_score": 63,
-      "priority": "high",
-      "desc": "从 analysis Rank 2 映射: <target> -c CFG -f FILE --check — check 模式"
+      "id": "<tool>_<variant>",
+      "name": "<tool>_<variant>",
+      "analysis_tool": "<tool>",
+      "analysis_id": <N>,
+      "vuln_score": <score>,
+      "priority": "<critical|high|medium|low>",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color afl-fuzz ... -- /workspace/<proj>/build_afl/<tool> <params> @@",
+      "cmplog_binary": "/workspace/<proj>/build_cmplog/<tool>",
+      "seeds_dir": "seeds_<format>",
+      "desc": "从 analysis Rank N (score N) 映射: <原始命令>"
     }
   ]
 }
-EOF
 ```
+
+如果没有 CMPLOG 二进制，就不填 `cmplog_binary` 字段。
+
+**再次确认：如果在 Step 3 自检中发现遗漏，必须回头补上，不能跳过。**
 
 ---
 
@@ -433,8 +408,6 @@ If no test data exists, create the smallest valid input for the target format. F
 
 If a strategy from Phase 3 needs a **different seed format** (e.g. JPEG seeds for a JPEG decode strategy), create a separate seed directory for it (e.g. `seeds_jpeg/`).
 
-**IMPORTANT: Different file extensions = different format = separate seed directories. For example: `seeds_dot/` for `.dot/.gv`, `seeds_gml/` for `.gml`, `seeds_emf/` for `.emf`. Do NOT mix extensions in one dir.**
-
 ### 4c. Deduplicate and minimize corpus
 ```bash
 mkdir -p seeds_min
@@ -451,7 +424,187 @@ echo -e 'magic="\\x00\\x01"' > target.dict
 echo 'header="<html>"' >> target.dict
 ```
 
-The skill ends after Phase 4 with a completed `fuzz_manifest.json` in the fuzz workspace.
+---
+
+## Phase 5: Batched Parallel Fuzzing Campaign
+
+Launch strategies from Phase 3 in **batches of 3–4** at a time — each in its own output directory. This balances coverage diversity with memory/CPU constraints. When a batch stagnates, harvest results and move to the next batch.
+
+### ⛔ HARD RULE: Memory limit `-m` max 4096, never `none`
+
+当你写 afl-fuzz 命令时，**`-m` 参数的值不能超过 4096，且绝对不能是 `none`**：
+
+```
+✅ 正确: afl-fuzz ... -m 4096 ... -- ./target @@
+✅ 正确: afl-fuzz ... -m 1024 ... -- ./target @@
+❌ 禁止: afl-fuzz ... -m none ... -- ./target @@
+❌ 禁止: afl-fuzz ... -m 8192 ... -- ./target @@
+```
+
+任何时候都不允许使用 `-m none`。如果你发现 ASAN 的 fork server 崩溃（虚拟地址空间不足），**绝不要用 `-m none` 或提高 `-m` 超过 4096**，而是添加环境变量 `AFL_NO_FORKSRV=1`，保持 `-m` 在 4096 以内：
+
+```
+✅ 正确: AFL_NO_FORKSRV=1 afl-fuzz ... -m 4096 ... -- ./target @@
+✅ 正确: AFL_NO_FORKSRV=1 afl-fuzz ... -m 1024 ... -- ./target @@
+```
+
+**如果加了 `AFL_NO_FORKSRV=1` 后目标仍然需要超过 4096 MB（例如处理大文件时 `mmap` 分配超限），说明 ASAN 的内存开销太大。此时不要用 `-m none`，而是去掉 ASAN 重新编译目标：**
+
+```bash
+# 去掉 ASAN 重新编译（保持 AFL++ 插桩）
+cd "$PROJ"
+make clean 2>/dev/null || true
+CC=afl-clang-fast CXX=afl-clang-fast++ cmake .. -DCMAKE_BUILD_TYPE=Debug -DBUILD_SHARED_LIBS=OFF
+make -j"$(nproc)"
+```
+
+去掉 ASAN 后虚拟内存占用大幅下降，`-m 4096` 即可正常运行。虽然失去 ASAN 的运行时检测，但总比用 `-m none` 导致 OOM 打满宿主机强。
+
+违反这条规则的后果：`-m none` 会禁掉 AFL++ 的内存限制，如果目标程序有内存泄漏，会直接 OOM 打满宿主机，导致整个 fuzzing 任务被 kill。
+
+### afl-fuzz Parameters Reference
+
+| 参数 | 说明 |
+|------|------|
+| `-i <dir>` | 种子语料库目录 |
+| `-o <dir>` | 输出目录（存放结果、崩溃、队列） |
+| `-m <mb>` | 每个进程的内存上限（MB），`-m 4096` = 4GB |
+| `-t <ms>` | 每个用例的超时时间（毫秒） |
+| `-p <schedule>` | Power schedule 策略：`explore`/`fast`/`coe`/`rare`/`exploit`/`lin`/`quad`/`mmopt`/`seek` |
+| `-c <file>` | CMPLOG 二进制路径，用于 Redqueen 破解 magic bytes |
+| `-x <file>` | 字典文件，用于结构化 token 变异 |
+| `@@` | AFL 占位符，fuzz 时替换为实际输入文件路径 |
+
+**资源限制：** 见上方 ⛔ HARD RULE — `-m` 最大 4096，禁止 `none`。fork server 崩溃时加 `AFL_NO_FORKSRV=1` 而非提高 `-m`。
+
+### 5a. Launch Strategies in Batches of 4
+
+Use `fuzz_manifest.json` generated in Phase 3. Strategies are grouped into **batches of 4** by priority (highest scores first). Launch each batch simultaneously, one batch at a time.
+
+```bash
+# Load strategies from Phase 3 manifest
+STRATEGIES=$(cat fuzz_manifest.json)
+
+# Batch 1: first 4 strategies by priority
+# Batch 2: next 4 strategies
+```
+
+Launch each batch as **background processes** and track their PIDs:
+
+```bash
+# Example — Batch 1 (3 instances), each in background with PID tracking（不同工具可能需要不同格式的输入）
+nohup afl-fuzz -i seeds -o out_default -m 4096 -t 10000 -- $PROJ/target @@ > out_default/fuzz.log 2>&1 &
+echo $! > out_default/pid
+
+nohup afl-fuzz -i seeds -o out_debug -m 4096 -t 10000 -p rare -- $PROJ/target --debug @@ > out_debug/fuzz.log 2>&1 &
+echo $! > out_debug/pid
+
+nohup afl-fuzz -i seeds -o out_cmplog -m 4096 -t 10000 -c $PROJ/target_cmplog -x target.dict -- $PROJ/target @@ > out_cmplog/fuzz.log 2>&1 &
+echo $! > out_cmplog/pid
+```
+
+**Rules:**
+- **Max 3–4 instances per batch** to avoid OOM (if targets are memory-hungry, reduce to 2-3).
+- **Never use `-m none`** — each instance limited to `-m 4096` max.
+- Each instance **must** use a unique `-o` directory.
+- Adjust `-t` timeout per strategy if a particular command is slower.
+- Save PIDs for background processes: `echo $! > out_default/pid`.
+
+### 5b. Monitoring All Instances
+
+程序稳定运行不报错后，**每天检查一次即可**（节约资源和token）。但出现报错（如 AFL 崩溃、OOM、磁盘满、进程异常退出等）时，**必须立即呼出检查原因**。
+
+Check **all strategy output dirs** to get the full picture:
+
+```bash
+# Summary across all strategies
+for d in out_*/; do
+  echo "=== $(basename $d) ==="
+  grep -E "edge_found|unique_crashes|paths_total|exec_speed" "$d/fuzzer_stats" 2>/dev/null || echo "  (no stats)"
+done
+```
+
+Key metrics:
+- `edge_found` → primary coverage metric (unique edges discovered)
+- `paths_total` → unique paths in queue
+- `unique_crashes` → crashes found so far
+- `exec_speed` → executions/sec (diagnostic — if too low, check for issues)
+
+### 5c. Batch Stagnation & Advancing to Next Batch
+
+Within a batch, each instance runs independently. **A batch is stagnated when all instances in it have no new `edge_found` for the last 12 hours.**
+
+```bash
+# Check all instances in the current batch (e.g. out_default, out_debug, out_cmplog)
+for d in out_*/; do
+  echo "$(basename $d): $(grep edge_found $d/fuzzer_stats 2>/dev/null)"
+done
+```
+
+When the current batch stagnates **or** runs for over 24 hours:
+
+1. **Stop all afl-fuzz instances in the current batch using saved PIDs:**
+   ```bash
+   for pidfile in out_*/pid; do
+     [ -f "$pidfile" ] && kill $(cat "$pidfile") 2>/dev/null
+   done
+   sleep 2  # allow afl-fuzz to flush stats
+   ```
+
+2. **Collect crashes** from this batch:
+   ```bash
+   mkdir -p all_crashes
+   for d in out_*/; do
+     cp "$d/crashes/id:"* all_crashes/ 2>/dev/null
+   done
+   ```
+
+3. **Record batch results** to `campaign_results.md`:
+   ```bash
+   source target_metadata.sh 2>/dev/null
+   cat >> campaign_results.md << 'EOF'
+   ### Batch 1 — default, debug, cmplog
+   EOF
+   for d in out_*/; do
+     name=$(basename "$d")
+     cov=$(grep "edge_found" "$d/fuzzer_stats" 2>/dev/null | cut -d: -f2 | tr -d ' ')
+     crashes=$(grep "unique_crashes" "$d/fuzzer_stats" 2>/dev/null | cut -d: -f2 | tr -d ' ')
+     echo "- ${name}: ${cov:-N/A} edges, ${crashes:-0} crashes" >> campaign_results.md
+   done
+   ```
+
+4. **Clean up** the batch output dirs:
+   ```bash
+   rm -rf out_*/ queue/ .cur_input 2>/dev/null
+   ```
+
+5. **Load next batch** from `fuzz_strategies.json` and repeat from 5a.
+
+### 5d. Termination
+
+The campaign runs until the deadline approaches or all batches complete. Fuzzing outputs (out_*) remain in place for later crash analysis.
+
+---
+
+## Phase 6: Cleanup & Completion Signal
+
+When the campaign ends (deadline reached or all batches done), **stop all afl-fuzz processes for this project**:
+
+```bash
+# Kill all afl-fuzz instances belonging to this project
+ps aux | grep afl-fuzz | grep "$PROJ" | grep -v grep | awk '{print $2}' | xargs -r kill 2>/dev/null
+sleep 2
+# Force kill any remaining
+ps aux | grep afl-fuzz | grep "$PROJ" | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null
+```
+
+After cleanup, signal completion with:
+
+```text
+[FUZZ_COMPLETE] project=$PROJ duration=<elapsed_time> batches=<N> status=<completed|deadline>
+```
+
+This signal tells the orchestrator the agent has finished and it's safe to proceed to the next pipeline phase.
 
 ## Trigger Examples
 

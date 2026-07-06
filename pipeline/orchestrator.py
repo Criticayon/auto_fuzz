@@ -322,6 +322,19 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
     for num in range(start_phase, end_phase + 1):
         label = ["", "Program Analysis", "Preprocess", "Execute Fuzz", "Issue Generator"][num]
 
+        # 清除下游 phase 的 artifacts，避免上一次运行的残留文件导致状态误判
+        for downstream_num in range(num + 1, 5):
+            downstream_phase = ["", "program-analysis", "auto-fuzz", "auto-fuzz-exec", "issue-generator"][downstream_num]
+            for art in ARTIFACTS.get(downstream_phase, []):
+                p = Path(work_dir) / art
+                if p.exists():
+                    if p.is_dir():
+                        import shutil
+                        shutil.rmtree(str(p))
+                    else:
+                        p.unlink()
+                    logger.info("[cleanup] removed downstream artifact: %s (from phase %s)", art, downstream_num)
+
         if num == 1:
             prompt = (
                 f"Run the program-analysis skill on the project at {target}.\n"
