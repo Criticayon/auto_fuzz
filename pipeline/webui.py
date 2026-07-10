@@ -455,9 +455,29 @@ async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86
 @app.post("/api/pipeline/stop")
 async def api_pipeline_stop():
     """停止 pipeline 子进程 + 清理容器内 afl-fuzz。"""
-    global _pipeline_proc, _current_target
+    global _pipeline_proc, _current_target, _killed_strategies
 
-    # 1) 发送停止信号（touch .stop_signal），让 orchestrator 优雅关闭
+    # 1) 收集所有 afl-fuzz 的最终状态，存入 killed_strategies
+    stats = get_outdir_stats()
+    for s in stats:
+        entry = {
+            "name": s.get("name", "?"),
+            "pid": s.get("pid", "?"),
+            "edges": s.get("edge_found", "0"),
+            "crashes": s.get("unique_crashes", "0"),
+            "paths": s.get("paths_total", "0"),
+            "speed": s.get("exec_speed", "\u2014"),
+            "cycles": s.get("cycles_done", "0"),
+            "bitmap": s.get("bitmap_cvg", "\u2014"),
+            "runtime": s.get("run_time", "\u2014"),
+            "killed_at": time.time(),
+            "killed_by": "stop_all",
+        }
+        _killed_strategies.append(entry)
+    if stats and _current_target:
+        _save_killed(_current_target)
+
+    # 2) 发送停止信号（touch .stop_signal），让 orchestrator 优雅关闭
     if _current_target:
         stop_path = BASE_DIR / "outputs" / _current_target / STOP_SIGNAL
         stop_path.parent.mkdir(parents=True, exist_ok=True)
@@ -470,7 +490,7 @@ async def api_pipeline_stop():
         docker_exec("kill -9 $(ps aux | grep afl-fuzz | grep -v grep | awk '{print $2}') 2>/dev/null || true")
         return {"status": "stopped", "total_crashes": 0}
 
-    # 2) 等待进程优雅退出（orchestrator 收到信号后调用 client.disconnect() + 清理 afl-fuzz）
+    # 3) 等待进程优雅退出（orchestrator 收到信号后调用 client.disconnect() + 清理 afl-fuzz）
     try:
         proc.wait(timeout=15)
         logger.info("[stop] pipeline exited gracefully")
@@ -481,10 +501,9 @@ async def api_pipeline_stop():
     _pipeline_proc = None
     _current_target = None
 
-    # 3) 保险：清理容器内残留的 afl-fuzz
+    # 4) 保险：清理容器内残留的 afl-fuzz
     docker_exec("kill -9 $(ps aux | grep afl-fuzz | grep -v grep | awk '{print $2}') 2>/dev/null || true")
 
-    stats = get_outdir_stats()
     total_crashes = sum(int(s.get("unique_crashes", 0)) for s in stats)
     logger.info("[stop] done, total crashes: %s", total_crashes)
     return {"status": "stopped", "total_crashes": total_crashes}

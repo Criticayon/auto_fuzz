@@ -1,16 +1,34 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #fef7e8; color: #24292f; min-height: 100vh; }
-  .header { background: linear-gradient(180deg, #d4a373 0%, #b88352 40%, #9c6b3e 100%); border-bottom: none; box-shadow: 0 3px 12px rgba(0,0,0,0.12); padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; position: relative; }
+  .header { background: linear-gradient(180deg, #d4a373 0%, #b88352 40%, #9c6b3e 100%); border-bottom: none; box-shadow: 0 3px 12px rgba(0,0,0,0.12); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; position: relative; }
   .header-left { display: flex; flex-direction: column; gap: 2px; }
   .header-brand { display: flex; align-items: center; gap: 14px; }
   .header-icon { font-size: 30px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
-  .header h1 { font-family: 'Orbitron', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 24px; font-weight: 700; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+  .header h1 { font-family: 'Orbitron', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.25); }
   .header h1 .highlight { font-weight: 900; }
-  .header .subtitle { font-size: 12px; color: rgba(255,255,255,0.75); letter-spacing: 2.5px; text-transform: uppercase; margin-left: 44px; position: relative; }
-  .header .subtitle::before, .header .subtitle::after { content: '✦'; margin: 0 6px; color: rgba(255,255,255,0.5); font-size: 9px; }
+  .header .subtitle { font-size: 11px; color: rgba(255,255,255,0.75); letter-spacing: 2.5px; text-transform: uppercase; margin-left: 44px; position: relative; }
+  .header .subtitle::before, .header .subtitle::after { content: '\u2726'; margin: 0 6px; color: rgba(255,255,255,0.5); font-size: 9px; }
   .header #globalStatus .badge { border-color: rgba(255,255,255,0.3); }
-  .paper-clip { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 34px; line-height: 1; z-index: 10; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); pointer-events: none; }
-  .container { max-width: 1400px; margin: 28px auto; padding: 28px 32px; background: #ffffff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 6px 24px rgba(0,0,0,0.06); position: relative; z-index: 1; }
+
+  /* ===== Sidebar Layout ===== */
+  .app-layout { width: 100%; display: flex; position: relative; z-index: 1; min-height: 100vh; }
+  .sidebar { width: 210px; flex-shrink: 0; background: #f6f0e6; display: flex; flex-direction: column; border-right: 1px solid #e8ddd0; }
+  .sidebar-header { padding: 16px 14px 12px; border-bottom: 1px solid #e8ddd0; }
+  .sidebar-target-select { width: 100%; padding: 7px 10px; border-radius: 6px; font-size: 13px; border: 1px solid #d0c4b4; background: #fffef8; color: #24292f; font-family: inherit; cursor: pointer; }
+  .sidebar-target-select:focus { outline: none; border-color: #d4a373; box-shadow: 0 0 0 2px rgba(212,163,115,0.2); }
+  .sidebar-nav { padding: 8px 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 14px; font-weight: 500; color: #5b4d3e; text-decoration: none; cursor: pointer; border-radius: 0; transition: all 0.15s ease; border-left: 3px solid transparent; user-select: none; }
+  .nav-item:hover { background: rgba(212,163,115,0.12); color: #3d3226; }
+  .nav-item.active { background: rgba(212,163,115,0.18); color: #3d3226; border-left-color: #d4a373; font-weight: 600; }
+  .nav-icon { font-size: 16px; line-height: 1; width: 20px; text-align: center; }
+
+  .main-content { flex: 1; min-width: 0; background: #ffffff; padding: 28px 32px; }
+
+  /* ===== Page Switching ===== */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ===== Shared Components ===== */
   .controls { background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px; margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
   .controls select, .controls button { padding: 8px 16px; border-radius: 6px; font-size: 14px; border: 1px solid #d0d7de; background: #f6f8fa; color: #24292f; }
   .controls button { font-weight: 600; cursor: pointer; transition: all 0.2s; border: none; }
@@ -109,20 +127,7 @@
   .summary-box li { margin: 4px 0; }
   .summary-box strong { font-weight: 600; }
   .summary-box em { font-style: italic; }
-  .summary-mode #strategyPanel,
-  .summary-mode #projectBar,
-  .summary-mode #statsGrid,
-  .summary-mode .section-title:not(#summaryTitle),
-  .summary-mode table:not(#summaryBox table),
-  .summary-mode #killedTitle,
-  .summary-mode #killedTable,
-  .summary-mode #logBox,
-  .summary-mode .log-box { display: none !important; }
-  .summary-mode .summary-box { display: block !important; max-height: none; }
-  .summary-mode #summaryWrapper { display: block !important; }
   @keyframes summaryFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-  .summary-mode #summaryWrapper { animation: summaryFadeIn 0.35s ease-out; }
-  #summaryWrapper { display: none; }
   .summary-header { display: flex; align-items: center; gap: 12px; padding: 20px 28px 16px; border-bottom: 2px solid #d0d7de; }
   .summary-header .icon { width: 36px; height: 36px; background: linear-gradient(135deg, #0969da, #1a7f37); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; flex-shrink: 0; }
   .summary-header .info { flex: 1; }
@@ -132,6 +137,5 @@
   .loading-skeleton { padding: 20px 0; }
   .loading-skeleton .bar { background: linear-gradient(90deg, #eaeef2 25%, #f6f8fa 50%, #eaeef2 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-  .summary-mode #btnPhase5 { background: #cf222e; color: #fff; border-color: #cf222e; }
   .code-burst { position: fixed; pointer-events: none; z-index: 9999; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; font-weight: 700; user-select: none; will-change: transform, opacity; animation: codeFloat 1.2s ease-out forwards; }
   @keyframes codeFloat { 0% { opacity: 1; transform: translate(0,0) rotate(0deg) scale(1); } 100% { opacity: 0; transform: translate(var(--dx),var(--dy)) rotate(var(--r)) scale(0.3); } }

@@ -6,6 +6,43 @@ async function api(url, opts) {
   catch { return null; }
 }
 
+function switchPage(pageName) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  const navEl = document.querySelector(`.nav-item[data-page="${pageName}"]`);
+  const pageEl = document.querySelector(`.page[data-page="${pageName}"]`);
+  if (navEl) navEl.classList.add('active');
+  if (pageEl) pageEl.classList.add('active');
+
+  // Auto-load content when switching to certain pages
+  if (pageName === 'report') {
+    loadSummary();
+  }
+}
+
+// Summary loading (extracted from old showSummary)
+async function loadSummary() {
+  const target = document.getElementById('targetSelect').value;
+  const wrapper = document.getElementById('summaryWrapper');
+  const empty = document.getElementById('reportEmpty');
+  if (!target) {
+    wrapper.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  wrapper.style.display = 'block';
+  document.getElementById('summaryTarget').textContent = target;
+  const box = document.getElementById('summaryBox');
+  box.innerHTML = '<div class="loading-skeleton"><div class="bar" style="width:60%;height:24px;margin-bottom:20px;"></div><div class="bar" style="width:40%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:100%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:80%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:55%;height:14px;margin-bottom:24px;"></div><div class="bar" style="width:45%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:90%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:70%;height:14px;"></div></div>';
+  const d = await api('/api/summary?target=' + encodeURIComponent(target));
+  if (d && d.content) {
+    box.innerHTML = marked.parse(d.content);
+  } else {
+    box.innerHTML = '<div style="text-align:center;color:#656d76;padding:60px 20px;font-size:15px;">No SUMMARY.md found for <strong>' + target + '</strong>. Run fuzzing and Phase 4 first to generate reports.</div>';
+  }
+}
+
 function updateDashboard() {
   const target = document.getElementById('targetSelect').value;
   loadManifest();
@@ -123,25 +160,7 @@ function toggleCmd(idx) {
 }
 
 async function showSummary() {
-  const target = document.getElementById('targetSelect').value;
-  if (!target) return;
-  const isActive = document.body.classList.contains('summary-mode');
-  if (isActive) {
-    document.body.classList.remove('summary-mode');
-    document.getElementById('btnPhase5').textContent = 'Phase 5: Summary';
-    return;
-  }
-  document.body.classList.add('summary-mode');
-  document.getElementById('btnPhase5').textContent = '\u2190 Back';
-  document.getElementById('summaryTarget').textContent = target;
-  const box = document.getElementById('summaryBox');
-  box.innerHTML = '<div class="loading-skeleton"><div class="bar" style="width:60%;height:24px;margin-bottom:20px;"></div><div class="bar" style="width:40%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:100%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:80%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:55%;height:14px;margin-bottom:24px;"></div><div class="bar" style="width:45%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:90%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:70%;height:14px;"></div></div>';
-  const d = await api('/api/summary?target=' + encodeURIComponent(target));
-  if (d && d.content) {
-    box.innerHTML = marked.parse(d.content);
-  } else {
-    box.innerHTML = '<div style="text-align:center;color:#656d76;padding:60px 20px;font-size:15px;">No SUMMARY.md found for <strong>' + target + '</strong>. Run fuzzing and Phase 4 first to generate reports.</div>';
-  }
+  switchPage('report');
 }
 
 async function loadManifest() {
@@ -199,6 +218,13 @@ document.addEventListener('DOMContentLoaded', () => {
   box.addEventListener('scroll', () => {
     const threshold = 30;
     logAtBottom = (box.scrollTop + box.clientHeight >= box.scrollHeight - threshold);
+  });
+
+  // Sidebar navigation clicks
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.addEventListener('click', () => {
+      switchPage(el.dataset.page);
+    });
   });
 });
 
@@ -401,7 +427,11 @@ document.addEventListener('DOMContentLoaded', () => {
     loadManifest();
     updateDashboard();
     loadRefContext();
-    document.body.classList.remove('summary-mode');
+    // If on report page, reload summary
+    const reportPage = document.querySelector('.page[data-page="report"]');
+    if (reportPage && reportPage.classList.contains('active')) {
+      loadSummary();
+    }
   });
 });
 
