@@ -24,7 +24,26 @@ source target_metadata.sh
 echo "PROJ=$PROJ BUILD_DIR=$BUILD_DIR COMMIT_HASH=$COMMIT_HASH"
 ```
 
-### Step 2: Check for existing ASAN binary
+### Step 2: Sync to latest commit
+
+Before reproducing crashes, ensure the source code is at the latest upstream commit. A crash that was already fixed in a newer commit is not a valid vulnerability:
+
+```bash
+cd $PROJ
+git fetch origin
+LATEST=$(git rev-parse origin/HEAD)
+CURRENT=$(git rev-parse HEAD)
+if [ "$CURRENT" != "$LATEST" ]; then
+  echo "Current commit $CURRENT is behind latest $LATEST, pulling..."
+  git pull --rebase origin HEAD
+  # 源码变了，旧的 ASAN binary 必须重建
+  rm -rf build_asan 2>/dev/null
+else
+  echo "Already at latest commit $CURRENT"
+fi
+```
+
+### Step 3: Check for existing ASAN binary
 
 Look for ASAN symbols in the existing binary. If available and has ASAN, skip the build:
 
@@ -39,7 +58,7 @@ fi
 ```
 Adjust the binary name (`gvpack` above is just an example) to match the actual target being analyzed.
 
-### Step 3: Build with ASAN (if needed)
+### Step 4: Build with ASAN (if needed)
 
 If no ASAN binary exists, rebuild. Use the same build system as the original project:
 
@@ -60,7 +79,7 @@ make -j$(nproc)
 
 > **重要:** 对于 cmake 项目，`-DCMAKE_C_COMPILER` 和 `-DCMAKE_CXX_COMPILER` 写入 CMakeCache.txt 后重新 cmake 时无需重复指定。但 `AFL_USE_ASAN=1` 环境变量必须每次都 export。
 
-### Step 4: Record build commands
+### Step 5: Record build commands
 
 After ensuring an ASAN binary exists, save the exact build commands to `target_metadata.sh` so issue-generator can reference them:
 
@@ -86,7 +105,7 @@ Fill in the exact cmake/configure command used. Include all flags and options. I
 ## Workflow Overview
 
 ```
-Phase 0: Build ASAN       → Rebuild target with ASAN, record build commands to target_metadata.sh
+Phase 0: Sync & Build ASAN → Git pull to latest commit, rebuild target with ASAN, record build commands to target_metadata.sh
 Phase 1: Collect Crashes  → Gather crash inputs from all out_*/crashes/
 Phase 2: Reproduce & Dedupe → ASAN reproduce, dedup by (ASAN error type + src file:line), count instances in memory
 Phase 3: Analyze & Save   → Full ASAN output per unique crash, save PoC + reproduce.sh with count comment

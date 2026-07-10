@@ -1,0 +1,445 @@
+let polling = true;
+let logAtBottom = true;
+
+async function api(url, opts) {
+  try { return await (await fetch(url, opts || {})).json(); }
+  catch { return null; }
+}
+
+function updateDashboard() {
+  const target = document.getElementById('targetSelect').value;
+  loadManifest();
+  api('/api/status' + (target ? `?target=${encodeURIComponent(target)}` : '')).then(d => {
+    if (!d) return;
+    document.getElementById('stratCount').textContent = d.total_strategies || '\u2014';
+    document.getElementById('procCount').textContent = d.process_count;
+    document.getElementById('totalEdges').textContent = (d.total_edges||0).toLocaleString();
+    document.getElementById('totalCrashes').textContent = (d.total_crashes||0).toLocaleString();
+    document.getElementById('staleCount').textContent = d.stale_count || 0;
+
+    const running = d.pipeline_running || d.running;
+    const gs = document.getElementById('globalStatus');
+    if (d.pipeline_running) {
+      gs.innerHTML = '<span class="badge badge-green"><span class="status-dot green pulsing"></span>Pipeline Running</span>';
+    } else if (d.running) {
+      gs.innerHTML = '<span class="badge badge-green"><span class="status-dot green pulsing"></span>AFL++ Running</span>';
+    } else {
+      gs.innerHTML = '<span class="badge badge-red"><span class="status-dot gray"></span>Idle</span>';
+    }
+
+    // 按钮状态
+    const noTarget = !document.getElementById('targetSelect').value;
+    document.getElementById('btnPhase1').disabled = running || noTarget;
+    document.getElementById('btnPhase2').disabled = running || noTarget;
+    document.getElementById('btnPhase3').disabled = d.pipeline_running || noTarget;
+    document.getElementById('btnPhase4').disabled = running || noTarget;
+    document.getElementById('btnPhase5').disabled = noTarget;
+    document.getElementById('clsPhase1').disabled = noTarget;
+    document.getElementById('clsPhase2').disabled = noTarget;
+    document.getElementById('clsPhase3').disabled = noTarget;
+    document.getElementById('clsPhase4').disabled = noTarget;
+    document.getElementById('btnClean').disabled = running || noTarget;
+    // Stop All 按钮：有正在跑的进程才显示
+    document.getElementById('btnStopAll').style.display = d.running ? 'inline-block' : 'none';
+    // 没选项目或没有 afl-fuzz 在跑时隐藏追加提示
+    const tt = document.querySelector('.tooltip-wrap .tooltip-text');
+    if (tt) tt.style.display = (noTarget || !d.running) ? 'none' : '';
+
+    // 项目显示 + 动画条
+    const pBar = document.getElementById('projectBar');
+    const pName = document.getElementById('currentProject');
+    const aFill = document.getElementById('activityFill');
+    const aLabel = document.getElementById('activityLabel');
+    if (d.current_target) {
+      pBar.style.display = 'flex';
+      pName.textContent = d.current_target;
+      if (running) {
+        aFill.className = 'fill active';
+        aLabel.textContent = d.pipeline_running ? 'Pipeline Running...' : 'Fuzzing...';
+      } else {
+        aFill.className = 'fill';
+        aFill.style.width = d.running ? '60%' : '0%';
+        aLabel.textContent = d.running ? 'Fuzzing' : 'Idle';
+      }
+    } else {
+      pBar.style.display = 'none';
+    }
+
+    // 策略表格（含展开命令）
+    const sBody = document.getElementById('strategiesBody');
+    if (d.strategies && d.strategies.length) {
+      sBody.innerHTML = d.strategies.map((s, idx) => {
+        const rt = s.run_time ? (t=>{const h=Math.floor(t/3600),m=Math.floor((t%3600)/60);return h?h+'h '+m+'m':m?m+'m':t+'s'})(parseInt(s.run_time)) : '\u2014';
+        const expanded = window._expandedRows || new Set();
+        const showCmd = expanded.has(idx);
+        const cmdRow = s.full_cmd ? `<tr class="cmd-detail" id="cmd_${idx}" style="${showCmd?'':'display:none;'}"><td colspan="11"><pre>${s.full_cmd}</pre></td></tr>` : '';
+        const staleHtml = s.stale ? '<span class="stale-icon">\u26a0<span class="stale-tip">Edges unchanged for 2+ hours</span></span>' : '';
+        return `<tr class="strategy-row" onclick="toggleCmd(${idx})"><td><span class="arrow ${showCmd?'open':''}" id="arrow_${idx}">\u25b6</span></td><td><strong>${s.name}</strong>${staleHtml}</td><td class="pid-cell">${s.pid||'\u2014'}</td><td class="edges">${s.edge_found||0}</td><td class="crashes">${s.unique_crashes||0}</td><td>${s.paths_total||0}</td><td class="speed">${s.exec_speed||'\u2014'}${s.exec_speed?'/s':''}</td><td>${s.cycles_done||0}</td><td>${s.bitmap_cvg||'\u2014'}</td><td>${rt}</td><td><button class="kill-btn" onclick="event.stopPropagation();killStrategy(${s.pid})" ${s.pid?'':'disabled'}>Stop</button></td></tr>${cmdRow}`;
+      }).join('');
+    } else {
+      sBody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#8b949e;">No active strategies</td></tr>';
+    }
+
+    // 已终止策略表格（仅选了项目才显示）
+    const killedTitle = document.getElementById('killedTitle');
+    const killedTable = document.getElementById('killedTable');
+    const killedBody = document.getElementById('killedBody');
+    const hasTarget = !!document.getElementById('targetSelect').value;
+    if (hasTarget && d.killed && d.killed.length) {
+      killedTitle.style.display = 'block';
+      killedTable.style.display = 'table';
+      killedBody.innerHTML = d.killed.map(function(k) {
+        return '<tr><td><strong>' + (k.name||'?') + '</strong></td><td>' + (k.pid||'\u2014') + '</td><td>' + (k.edges||'0') + '</td><td>' + (k.crashes||'0') + '</td><td>' + (k.paths||'0') + '</td><td>' + (k.speed||'\u2014') + '</td><td>' + (k.cycles||'0') + '</td><td>' + (k.bitmap||'\u2014') + '</td><td>' + (k.runtime||'\u2014') + '</td></tr>';
+      }).join('');
+    } else {
+      killedTitle.style.display = 'none';
+      killedTable.style.display = 'none';
+    }
+  });
+
+  api('/api/log').then(d => {
+    if (d && d.log) {
+      const box = document.getElementById('logBox');
+      const wasAtBottom = logAtBottom;
+      box.textContent = d.log;
+      if (wasAtBottom) {
+        box.scrollTop = box.scrollHeight;
+      }
+    }
+  });
+}
+
+function toggleCmd(idx) {
+  const row = document.getElementById('cmd_' + idx);
+  const arrow = document.getElementById('arrow_' + idx);
+  if (row) {
+    const show = row.style.display !== 'table-row';
+    row.style.display = show ? 'table-row' : 'none';
+    if (arrow) arrow.className = 'arrow' + (show ? ' open' : '');
+    if (!window._expandedRows) window._expandedRows = new Set();
+    if (show) window._expandedRows.add(idx);
+    else window._expandedRows.delete(idx);
+  }
+}
+
+async function showSummary() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const isActive = document.body.classList.contains('summary-mode');
+  if (isActive) {
+    document.body.classList.remove('summary-mode');
+    document.getElementById('btnPhase5').textContent = 'Phase 5: Summary';
+    return;
+  }
+  document.body.classList.add('summary-mode');
+  document.getElementById('btnPhase5').textContent = '\u2190 Back';
+  document.getElementById('summaryTarget').textContent = target;
+  const box = document.getElementById('summaryBox');
+  box.innerHTML = '<div class="loading-skeleton"><div class="bar" style="width:60%;height:24px;margin-bottom:20px;"></div><div class="bar" style="width:40%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:100%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:80%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:55%;height:14px;margin-bottom:24px;"></div><div class="bar" style="width:45%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:90%;height:14px;margin-bottom:12px;"></div><div class="bar" style="width:70%;height:14px;"></div></div>';
+  const d = await api('/api/summary?target=' + encodeURIComponent(target));
+  if (d && d.content) {
+    box.innerHTML = marked.parse(d.content);
+  } else {
+    box.innerHTML = '<div style="text-align:center;color:#656d76;padding:60px 20px;font-size:15px;">No SUMMARY.md found for <strong>' + target + '</strong>. Run fuzzing and Phase 4 first to generate reports.</div>';
+  }
+}
+
+async function loadManifest() {
+  const target = document.getElementById('targetSelect').value;
+  const panel = document.getElementById('strategyPanel');
+  const list = document.getElementById('strategyList');
+  const count = document.getElementById('strategyCount');
+  if (!target) { panel.style.display = 'none'; return; }
+  const prevChecked = new Set();
+  document.querySelectorAll('.strategy-cb:checked').forEach(cb => prevChecked.add(cb.value));
+  const d = await api(`/api/manifest?target=${encodeURIComponent(target)}`);
+  if (d && d.strategies && d.strategies.length) {
+    panel.style.display = 'block';
+    count.textContent = `${d.strategies.length} available (batch_size=${d.batch_size||4})`;
+    list.innerHTML = d.strategies.map(s => {
+      const wasChecked = prevChecked.has(String(s.id));
+      const p = s.priority||'medium';
+      const pBg = {critical:'#e1e4e8', high:'#ffebe9', medium:'#fff8c5', low:'#dafbe1'}[p]||'#fff8c5';
+      const pFg = {critical:'#000000', high:'#cf222e', medium:'#9a6700', low:'#1a7f37'}[p]||'#9a6700';
+      return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;">
+        <input type="checkbox" class="strategy-cb" value="${s.id}" ${wasChecked?'checked':''} onchange="updateSelectAll()" style="margin-top:3px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <strong style="font-size:14px;">${s.name||'id_'+s.id}</strong>
+            <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:${pBg};color:${pFg};">${p}</span>
+            <span style="font-size:11px;color:#656d76;">score: ${s.vuln_score||'?'}</span>
+          </div>
+          <div style="font-family:'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace;font-size:12px;color:#24292f;background:#ffffff;padding:8px 12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;line-height:1.5;">${s.command||'N/A'}</div>
+        </div>
+      </div>`;
+    }).join('');
+    updateSelectAll();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function toggleAllStrategies() {
+  const checked = document.getElementById('selectAllStrategies').checked;
+  document.querySelectorAll('.strategy-cb').forEach(cb => cb.checked = checked);
+}
+
+function updateSelectAll() {
+  const all = document.querySelectorAll('.strategy-cb');
+  const checked = document.querySelectorAll('.strategy-cb:checked');
+  document.getElementById('selectAllStrategies').checked = all.length === checked.length;
+}
+
+function getSelectedStrategyIds() {
+  return Array.from(document.querySelectorAll('.strategy-cb:checked')).map(cb => cb.value).join(',');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const box = document.getElementById('logBox');
+  box.addEventListener('scroll', () => {
+    const threshold = 30;
+    logAtBottom = (box.scrollTop + box.clientHeight >= box.scrollHeight - threshold);
+  });
+});
+
+async function startPipeline(phase) {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) { alert('Please select a target project first.'); return; }
+  const btnId = {1:'btnPhase1', 2:'btnPhase2', 3:'btnPhase3', 4:'btnPhase4'}[phase] || 'btnPhase1';
+  const btn = document.getElementById(btnId);
+  const status = document.getElementById('pipelineStatus');
+  btn.disabled = true;
+  status.textContent = 'Starting...';
+  status.style.color = '#9a6700';
+
+  if (phase === 3) {
+    const refEnabled = document.getElementById('refEnabled').checked;
+    const ids = getSelectedStrategyIds();
+    if (!ids && !refEnabled) { alert('Please select at least one strategy.'); btn.disabled = false; return; }
+    const sel = await api(`/api/manifest/select?target=${encodeURIComponent(target)}&strategy_ids=${ids}`, {method:'POST'});
+    if (!sel || sel.error) {
+      status.textContent = sel && sel.error ? sel.error : 'Failed to save strategy selection';
+      status.style.color = '#cf222e';
+      btn.disabled = false;
+      return;
+    }
+  }
+
+  let url = `/api/pipeline/start?target=${encodeURIComponent(target)}&phase=${phase}`;
+  const r = await api(url, {method:'POST'});
+  btn.disabled = false;
+  status.style.color = '#656d76';
+  if (r && r.status === 'started') {
+    status.textContent = `Phase ${phase} running on ${target}`;
+    status.style.color = '#1a7f37';
+  } else {
+    const msg = r && r.error ? r.error : 'Failed to start';
+    status.textContent = msg;
+    status.style.color = '#cf222e';
+    if (msg === 'pipeline already running') {
+      alert('Pipeline is already running. Please stop it first or wait for it to complete.');
+    }
+  }
+}
+
+async function killStrategy(pid) {
+  if (!pid) return;
+  if (!confirm('Stop this afl-fuzz process (PID: ' + pid + ')?')) return;
+  var allRows = document.querySelectorAll('#strategiesBody tr.strategy-row');
+  var strategyData = {};
+  for (var i = 0; i < allRows.length; i++) {
+    var cells = allRows[i].cells;
+    if (cells.length >= 2) {
+      var rowPid = cells[2].textContent.trim();
+      if (rowPid === String(pid)) {
+        strategyData = {
+          name: cells[1].textContent.replace(/[\u26a0\u26a1].*$/, '').trim(),
+          pid: pid,
+          edges: cells[3].textContent.trim(),
+          crashes: cells[4].textContent.trim(),
+          paths: cells[5].textContent.trim(),
+          speed: cells[6].textContent.trim(),
+          cycles: cells[7].textContent.trim(),
+          bitmap: cells[8].textContent.trim(),
+          runtime: cells[9].textContent.trim()
+        };
+        break;
+      }
+    }
+  }
+  var target = document.getElementById('targetSelect').value;
+  var r = await api('/api/strategy/kill?pid=' + pid + '&target=' + encodeURIComponent(target), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({strategy: strategyData})
+  });
+  if (r && r.status === 'killed') {
+    updateDashboard();
+  }
+}
+
+async function stopAllStrategies() {
+  if (!confirm('Stop all running AFL++ strategies?')) return;
+  await api('/api/pipeline/stop', {method:'POST'});
+  updateDashboard();
+}
+
+async function cleanWorkspace() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) { alert('Please select a target project first.'); return; }
+  if (!confirm(`Clean all fuzz workspace for "${target}"?\n\nThis will:\n- Kill all afl-fuzz processes for this project\n- Delete container fuzz workspace\n- Delete host output directory\n\nThis cannot be undone!`)) return;
+  const status = document.getElementById('pipelineStatus');
+  status.textContent = 'Cleaning...';
+  status.style.color = '#9a6700';
+  const r = await api(`/api/workspace/clean?target=${encodeURIComponent(target)}`, {method:'POST'});
+  if (r && r.status === 'cleaned') {
+    document.getElementById('strategyPanel').style.display = 'none';
+    status.textContent = `Workspace cleaned for ${target}`;
+    status.style.color = '#1a7f37';
+  } else {
+    status.textContent = r && r.error ? r.error : 'Failed to clean';
+    status.style.color = '#cf222e';
+  }
+}
+
+async function cleanPhase(phase) {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const phaseNames = {1:'Analyze',2:'Prep',3:'Fuzz',4:'Issues',5:'Summary'};
+  if (!confirm(`Clear all files generated by Phase ${phase} (${phaseNames[phase]}) for "${target}"?`)) return;
+  const status = document.getElementById('pipelineStatus');
+  status.textContent = `Clearing Phase ${phase} output...`;
+  status.style.color = '#9a6700';
+  const r = await api(`/api/phase/clean?target=${encodeURIComponent(target)}&phase=${phase}`, {method:'POST'});
+  if (r && r.status === 'cleaned') {
+    status.textContent = `Phase ${phase} output cleared`;
+    status.style.color = '#1a7f37';
+    updateDashboard();
+  } else {
+    status.textContent = r && r.error ? r.error : 'Failed to clear';
+    status.style.color = '#cf222e';
+  }
+}
+
+async function stopAll() {
+  const status = document.getElementById('pipelineStatus');
+  status.textContent = 'Stopping...';
+  const r = await api('/api/pipeline/stop', {method:'POST'});
+  if (r) {
+    status.textContent = r.total_crashes ? `Stopped (${r.total_crashes} crashes collected)` : 'Stopped';
+  }
+}
+
+function toggleRefPanel() {
+  const panel = document.getElementById('refPanel');
+  const arrow = document.getElementById('refArrow');
+  if (!panel || !arrow) return;
+  const show = panel.style.display !== 'block';
+  panel.style.display = show ? 'block' : 'none';
+  arrow.className = 'arrow' + (show ? ' open' : '');
+}
+
+function onRefFileSelect(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  document.getElementById('refFileName').textContent = file.name;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var ta = document.getElementById('refTextInput');
+    var prefix = ta.value ? ta.value + '\\n\\n' : '';
+    ta.value = prefix + '> From ' + file.name + ':\\n' + e.target.result;
+  };
+  reader.readAsText(file);
+}
+
+async function clearRefContext() {
+  document.getElementById('refTextInput').value = '';
+  document.getElementById('refFileName').textContent = '';
+  var target = document.getElementById('targetSelect').value;
+  if (target) {
+    await api('/api/ref-context?target=' + encodeURIComponent(target), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: ''})
+    });
+  }
+  var saved = document.getElementById('refSaved');
+  saved.style.display = 'inline';
+  saved.textContent = 'Cleared';
+  setTimeout(function() { saved.style.display = 'none'; saved.textContent = '\u2713 Saved'; }, 2000);
+}
+
+async function saveRefContext() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const text = document.getElementById('refTextInput').value.trim();
+  const enabled = document.getElementById('refEnabled').checked;
+  const saved = document.getElementById('refSaved');
+  const r = await api(`/api/ref-context?target=${encodeURIComponent(target)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: text, enabled: enabled})
+  });
+  if (r && r.status === 'saved') {
+    saved.style.display = 'inline';
+    setTimeout(() => saved.style.display = 'none', 2000);
+  }
+}
+
+async function loadRefContext() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const r = await api(`/api/ref-context?target=${encodeURIComponent(target)}`);
+  if (r) {
+    document.getElementById('refTextInput').value = r.text || '';
+    document.getElementById('refEnabled').checked = r.enabled !== false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('targetSelect').addEventListener('change', () => {
+    loadManifest();
+    updateDashboard();
+    loadRefContext();
+    document.body.classList.remove('summary-mode');
+  });
+});
+
+api('/api/projects').then(d => {
+  if (d && d.projects) {
+    const sel = document.getElementById('targetSelect');
+    d.projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = p;
+      sel.appendChild(opt);
+    });
+  }
+});
+
+setInterval(updateDashboard, 5000);
+updateDashboard();
+
+const CODE_TOKENS = ['</>','{ }','0x00','afl','fuzz','/*..*/','for(;;)','while','if()','ptr->','++','!=','&&','||','SIGSEGV','ASAN','#include','[ ]','malloc','free','0xFF','{;}','==','!','main()','--','=>','::'];
+document.addEventListener('click', e => {
+  if (e.target.closest('button,select,input,a,option')) return;
+  const count = 6 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('span');
+    el.className = 'code-burst';
+    el.textContent = CODE_TOKENS[Math.floor(Math.random() * CODE_TOKENS.length)];
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 60 + Math.random() * 100;
+    const size = 12 + Math.random() * 14;
+    const hue = 200 + Math.random() * 60;
+    el.style.left = (e.clientX + (Math.random() - 0.5) * 20) + 'px';
+    el.style.top = (e.clientY + (Math.random() - 0.5) * 20) + 'px';
+    el.style.fontSize = size + 'px';
+    el.style.color = 'hsla(' + hue + ',70%,50%,0.9)';
+    el.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+    el.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+    el.style.setProperty('--r', (Math.random() - 0.5) * 720 + 'deg');
+    el.style.animationDuration = (0.6 + Math.random() * 0.8) + 's';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1500);
+  }
+});

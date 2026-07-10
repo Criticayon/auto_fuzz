@@ -216,6 +216,8 @@ fi
 Issue file template (in English) — generate one file per crash type, following this exact format:
 
 ```markdown
+# <Project Name>: <full ASAN error description> in <function_name> when <trigger condition>
+
 ## Description
 
 The crash occurs in: `<function_name>`
@@ -236,22 +238,18 @@ ASAN reports indicate: [specific ASAN finding, e.g., reads past allocated region
 
 ## Build Configuration
 
-Source `target_metadata.sh`. If `$BUILD_CMD` is set, use it verbatim as the Build Configuration code block. Otherwise fall back to the generic template below:
+Source `target_metadata.sh`. If `$BUILD_CMD` is set, output it as a raw bash code block (just the exact command, not wrapped in a function):
 
 ```bash
-build() {
-  export AFL_USE_ASAN=1
-  cd $SRC_DIR
-  mkdir -p build-afl
-  cd build-afl
+$BUILD_CMD
+```
 
-  CC=afl-clang-fast \
-  CXX=afl-clang-fast++ \
-  cmake ..
+If `BUILD_CMD` is not set, fall back to the generic template:
 
-  make -j$(nproc)
-  echo "[+] build done"
-}
+```bash
+export AFL_USE_ASAN=1
+CC=afl-clang-fast CXX=afl-clang-fast++ cmake .. -DCMAKE_C_COMPILER=afl-clang-fast -DCMAKE_CXX_COMPILER=afl-clang-fast++
+make -j$(nproc)
 ```
 
 ---

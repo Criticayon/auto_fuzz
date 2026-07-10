@@ -73,6 +73,16 @@ BATCH_SIZE=$(python3 -c "import json; print(json.load(open('$MANIFEST'))['batch_
 
 ## Step 2: Launch Batch 1
 
+### Pre-flight: check /dev/null
+
+在启动任何 afl-fuzz 前，先检查容器内的 `/dev/null` 是否正常：
+
+```bash
+container_exec command="if [ ! -c /dev/null ]; then rm -f /dev/null && mknod -m 666 /dev/null c 1 3; fi" workdir="/workspace/fuzz_<project>"
+```
+
+如果 `/dev/null` 损坏，AFL++ fork server 会无法丢弃子进程输出，导致启动失败。**如果检测到 `/dev/null` 损坏，只允许上述 `mknod` 修复，严禁重建容器。**
+
 For each strategy in the first batch, construct the `nohup afl-fuzz ...` command and launch it detached in the container using `container_exec_detached`.
 
 ### Memory limit: fork server 虚拟内存错误处理
@@ -170,7 +180,7 @@ container_exec command="ps aux | grep 'afl-fuzz' | grep -v grep | awk '{print \$
 
 ## Step 3: Verify All Strategies Are Running
 
-Confirm all launched afl-fuzz processes are running:
+### 3a. Confirm processes are alive
 
 ```bash
 container_exec command="ps aux | grep afl-fuzz | grep -v grep | head -20" workdir="/workspace/fuzz_<project>"
@@ -181,6 +191,40 @@ Check that you see one afl-fuzz process per strategy in the batch. Each should h
 If any strategy failed to start (missing from ps output):
 1. Check the log file: `cat <output_dir>/fuzz.log`
 2. Re-launch the failed strategy with corrected parameters
+
+### 3b. Wait for stable execution (fuzzer_stats)
+
+**不要仅仅确认进程存在就退出。** 必须等待每个策略的 `fuzzer_stats` 文件生成并包含有效的统计数据，这证明 AFL++ fork server 已正常初始化、fuzzer 正在处理种子输入。
+
+```bash
+# 等待所有策略的输出目录中出现 fuzzer_stats（最多等 60 秒）
+for i in $(seq 1 30); do
+  all_ready=true
+  for strategy_dir in <out_dir_1> <out_dir_2> ...; do
+    stats_file="/workspace/fuzz_<project>/${strategy_dir}/fuzzer_stats"
+    if [ ! -f "$stats_file" ]; then
+      all_ready=false
+      break
+    fi
+  done
+  $all_ready && break
+  sleep 2
+done
+
+# 确认 stats 中有有效的执行数据
+for strategy_dir in <out_dir_1> <out_dir_2> ...; do
+  stats_file="/workspace/fuzz_<project>/${strategy_dir}/fuzzer_stats"
+  if [ -f "$stats_file" ]; then
+    echo "=== ${strategy_dir} ==="
+    grep -E "start_time|last_update|exec_speed|paths_total|edge_found" "$stats_file" 2>/dev/null || echo "  (no data yet)"
+  else
+    echo "[WARN] ${strategy_dir}: fuzzer_stats missing after 60s — check logs"
+    cat "/workspace/fuzz_<project>/${strategy_dir}/fuzz.log" 2>/dev/null | tail -5
+  fi
+done
+```
+
+如果某个策略超过 60 秒仍未生成 `fuzzer_stats`，打印 warning 并输出其 fuzz.log 尾部，但不阻塞整体退出。
 
 ---
 
@@ -209,11 +253,10 @@ The agent should then **exit cleanly**. Do not wait, do not monitor, do not chec
 
 ## ⛔ What NOT To Do
 
-- Do NOT monitor fuzzing progress or check fuzzer_stats
 - Do NOT implement stagnation detection or batch advancement
 - Do NOT clean up afl-fuzz processes
-- Do NOT wait for fuzzing to complete
+- Do NOT wait for fuzzing to complete (only wait for fuzzer_stats to appear)
 - Do NOT modify the manifest or strategy commands (except rebuilding without ASAN when detected)
 - Do NOT use `-m none` — rebuild without ASAN instead and use `-m 4096`
 
-Launch, verify, signal, exit.
+Launch, verify stable stats, signal, exit.

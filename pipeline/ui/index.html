@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auto-Fuzz Control Center</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<!--STYLE-->
+</head>
+<body>
+<div class="header">
+  <div class="paper-clip">&#128206;</div>
+  <div class="header-left">
+    <div class="header-brand">
+      <span class="header-icon">&#128027;</span>
+      <h1>Auto-Fuzz <span class="highlight">Control Center</span></h1>
+    </div>
+    <div class="subtitle">Vulnerability Discovery Pipeline</div>
+  </div>
+  <div id="globalStatus"><span class="badge badge-yellow">Starting...</span></div>
+</div>
+
+<div class="container">
+
+  <div class="section-title" style="margin-top:0;">Pipeline</div>
+  <div class="controls">
+    <select id="targetSelect" style="min-width:160px;">
+      <option value="">-- Select target --</option>
+    </select>
+    <div class="phase-group"><button class="btn-primary" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button><button class="phase-clear" id="clsPhase1" onclick="cleanPhase(1)" disabled>clear</button></div>
+    <div class="phase-group"><button class="btn-primary" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button><button class="phase-clear" id="clsPhase2" onclick="cleanPhase(2)" disabled>clear</button></div>
+    <div class="phase-group"><div class="tooltip-wrap"><button class="btn-primary" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div><button class="phase-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
+    <div class="phase-group"><button class="btn-primary" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="phase-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
+    <div class="phase-group"><button class="btn-secondary" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
+    <div><button class="btn-secondary" id="btnClean" onclick="cleanWorkspace()" style="border-color:#cf222e;color:#cf222e;">Clean All</button></div>
+    <span id="pipelineStatus" style="font-size:13px;color:#656d76;margin-left:8px;"></span>
+  </div>
+
+  <div id="strategyPanel" style="display:none; background:#ffffff; border:1px solid #d0d7de; border-radius:8px; padding:16px 20px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+      <span class="section-title" style="margin:0;">Strategies</span>
+      <span style="font-size:12px;color:#656d76;" id="strategyCount"></span>
+      <span class="spacer" style="flex:1;"></span>
+      <button onclick="loadManifest()" style="font-size:12px;padding:4px 10px;border:1px solid #d0d7de;border-radius:4px;background:#f6f8fa;color:#656d76;cursor:pointer;">Refresh</button>
+      <label style="font-size:13px;color:#656d76;cursor:pointer;">
+        <input type="checkbox" id="selectAllStrategies" checked onchange="toggleAllStrategies()"> Select All
+      </label>
+    </div>
+    <div id="strategyList" style="display:flex; flex-direction:column; gap:6px;"></div>
+    <div style="margin-top:12px; padding-top:12px; border-top:1px solid #d0d7de;">
+      <div class="ref-toggle" onclick="toggleRefPanel()"><span class="arrow" id="refArrow">▶</span> Reference Context <label style="font-size:13px;font-weight:400;color:#656d76;cursor:pointer;margin-left:8px;user-select:none;" onclick="event.stopPropagation()"><input type="checkbox" id="refEnabled" checked> Enable</label></div>
+      <div class="ref-panel" id="refPanel" style="display:none; margin-bottom:0;">
+        <textarea id="refTextInput" placeholder="输入参考信息供 fuzz agent 参考（如已知漏洞模式、需要重点测试的路径等）" spellcheck="false"></textarea>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+          <label class="ref-btn ref-btn-upload">Upload .md<input type="file" id="refFileInput" accept=".md" style="display:none;" onchange="onRefFileSelect(event)"></label>
+          <button class="ref-btn ref-btn-primary" onclick="saveRefContext()">Save</button>
+          <button class="ref-btn ref-btn-default" onclick="clearRefContext()">Clear</button>
+          <span id="refSaved" style="font-size:12px;color:#1a7f37;display:none;">✓ Saved</span>
+          <span id="refFileName" style="font-size:12px;color:#656d76;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="project-bar" id="projectBar" style="display:none;">
+    <div><span class="proj-label">Testing</span><div class="proj-name" id="currentProject">—</div></div>
+    <div class="activity-bar"><div class="fill" id="activityFill"></div></div>
+    <span id="activityLabel" style="font-size:12px;color:#656d76;min-width:100px;">Idle</span>
+    <div class="spacer"></div>
+  </div>
+
+  <div class="section-title" style="margin-bottom:12px;">Overview</div>
+  <div class="grid" id="statsGrid">
+    <div class="card"><div class="label">Total Strategies</div><div class="value blue" id="stratCount">—</div></div>
+    <div class="card"><div class="label">Active Processes</div><div class="value blue" id="procCount">—</div></div>
+    <div class="card"><div class="label">Edges Found</div><div class="value green" id="totalEdges">—</div></div>
+    <div class="card"><div class="label">Crashes</div><div class="value red" id="totalCrashes">—</div></div>
+    <div class="card"><div class="label">Stale (2h+)</div><div class="value" id="staleCount" style="color:#d4940c;">—</div></div>
+  </div>
+
+  <div style="display:flex; align-items:center; gap:12px; margin:24px 0 14px;">
+    <div class="section-title" style="margin:0;">Strategies</div>
+    <span class="spacer" style="flex:1;"></span>
+    <button class="kill-btn" id="btnStopAll" onclick="stopAllStrategies()" style="display:none;">Stop All</button>
+  </div>
+  <table>
+    <thead><tr><th></th><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th><th></th></tr></thead>
+    <tbody id="strategiesBody"><tr><td colspan="11" style="text-align:center;color:#8b949e;">Waiting...</td></tr></tbody>
+  </table>
+
+  <div class="section-title" id="killedTitle" style="display:none;">Stopped Strategies</div>
+  <table id="killedTable" style="display:none;">
+    <thead><tr><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th></tr></thead>
+    <tbody id="killedBody"></tbody>
+  </table>
+
+  <div id="summaryWrapper">
+    <div class="card" style="padding:0;">
+      <div class="summary-header">
+        <div class="icon">&#128269;</div>
+        <div class="info">
+          <div class="title">Campaign Summary</div>
+          <div class="sub" id="summaryTarget"></div>
+        </div>
+        <span class="badge">Phase 5</span>
+      </div>
+      <div class="summary-box" id="summaryBox"></div>
+    </div>
+  </div>
+
+  <div class="section-title">Log</div>
+  <div class="log-box" id="logBox">(waiting for data...)</div>
+</div>
+
+<div class="footer">Auto-Fuzz Control Center · auto-refresh 5s</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!--SCRIPT-->
+</body>
+</html>

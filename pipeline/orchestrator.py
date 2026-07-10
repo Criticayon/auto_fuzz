@@ -211,7 +211,7 @@ def print_state(work_dir: Path) -> None:
 # Pipeline Execution
 # ──────────────────────────────────────────────
 
-async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | None = None, skills: list[str] | None = None) -> None:
+async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | None = None) -> None:
     t0 = time.time()
     logger.info("")
     logger.info("=" * 60)
@@ -224,7 +224,6 @@ async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | 
         allowed_tools=BASE_TOOLS,
         permission_mode=perm_mode,
         mcp_servers=mcp_servers or {},
-        skills=skills,
     )
 
     msg_count = 0
@@ -341,7 +340,6 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"Save all output files to {work_dir}."
             )
             mcp = None
-            skills_list = None
 
         elif num == 2:
             logger.info(">>> Phase 2: Connecting to AFL++ container...")
@@ -370,6 +368,9 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"Only fuzz output dirs (out_*), seeds, dictionaries, and fuzz_manifest.json go under {FUZZ_CONT}/.\n"
                 f"Use container_exec for all compilation.\n"
                 f"Do NOT create build scripts on the host.\n"
+                f"CRITICAL: Do NOT delete, stop, restart, or modify the AFL++ container itself. "
+                f"Never run 'docker rm', 'docker stop', 'docker compose down', or any docker management commands on the host. "
+                f"All container operations must use container_exec tool only.\n"
                 f"After building and generating seeds + manifest:\n"
                 f"  1. SAVE fuzz_manifest.json to both {FUZZ_CONT}/fuzz_manifest.json (container) AND to the current directory (host workdir)\n"
                 f"  2. SAVE target_metadata.sh to both {FUZZ_CONT}/target_metadata.sh (container) AND to the current directory (host workdir)\n"
@@ -399,12 +400,23 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"Run the auto-fuzz-exec skill.\n"
                 f"Fuzz workspace (container): {FUZZ_CONT}\n"
                 f"Use container_exec / container_exec_detached for all operations.\n"
+                f"CRITICAL: Do NOT delete, stop, restart, or modify the AFL++ container itself. "
+                f"Never run 'docker rm', 'docker stop', 'docker compose down', or any docker management commands on the host. "
+                f"All container operations must use container_exec / container_exec_detached only.\n"
                 f"Source target_metadata.sh, read {manifest_file} (this is the user-selected manifest).\n"
                 f"If it has strategies, launch ALL of them (batch_size = total count), "
                 f"verify processes are stably running.\n"
                 f"If it is empty (no strategies selected), do NOT launch anything from it.\n"
                 f"If you later add new strategies to the manifest mid-execution, launch ONLY the newly added ones — "
                 f"do not re-launch strategies that are already running.\n"
+                f"NOTE: If afl-fuzz fork server crashes with virtual memory errors "
+                f"(mmap failed, Cannot allocate memory, ASAN shadow memory range), "
+                f"it means the ASAN binary's ~20TB shadow memory conflicts with -m's RLIMIT_AS. "
+                f"Do NOT use -m none. Instead, rebuild the target binary without ASAN: "
+                f"env -u AFL_USE_ASAN cmake ... && env -u AFL_USE_ASAN make -j$(nproc). "
+                f"Also rebuild the CMPLOG variant the same way. "
+                f"Then update target_metadata.sh and manifest paths to point to the non-ASAN binaries, "
+                f"and launch with normal -m 4096.\n"
                 f"Then:\n"
                 f"  1. Touch {FUZZ_CONT}/fuzz_started.signal (in container)\n"
                 f"  2. Also create fuzz_started.signal in the current directory (host workdir)\n"
@@ -451,10 +463,9 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"Individual issue files must be in English."
             )
             mcp = {"container": create_container_server()}
-            skills_list = ["crash-reporter", "issue-generator"]
 
         logger.info(">>> Starting Phase %s: %s", num, label)
-        await run_phase(num, prompt, work_dir, mcp_servers=mcp, skills=skills_list)
+        await run_phase(num, prompt, work_dir, mcp_servers=mcp)
 
         # Phase 1 结束后：确保项目源码在容器内
         if num == 1:

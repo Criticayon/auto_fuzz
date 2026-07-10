@@ -216,6 +216,19 @@ METADATA
 echo "Target: ${PROJECT_VERSION} (${COMMIT_HASH}), date: ${REPORT_DATE}"
 ```
 
+然后**将实际使用的 ASAN 编译命令记录到 target_metadata.sh**，供后续 crash-reporter / issue-generator 使用：
+
+```bash
+cat >> target_metadata.sh <<- 'BUILDCMD'
+
+# Build commands used for ASAN crash reproduction
+BUILD_CMD='AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ cmake .. -DCMAKE_C_COMPILER=afl-clang-fast -DCMAKE_CXX_COMPILER=afl-clang-fast++ && make -j$(nproc)'
+BUILDCMD
+```
+
+> 根据实际项目的编译命令调整 BUILD_CMD 的值。如果项目用 autotools（./configure），对应改为 `AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ ./configure --disable-shared ... && make -j$(nproc)`。
+```
+
 These variables will be sourced in later phases for report generation.
 
 ---
@@ -275,7 +288,13 @@ cat /workspace/fuzz_<project>/fuzz_tool_list.md
 
 **Step 3 — 用 bash 写 `manifest_selfcheck.md`（容器 + 宿主机双写）**
 
-生成 manifest 后，立即先写入容器，再用 Write 工具写入宿主机。**如果有任何 score ≥ 20 的 Rank 没有被包含在 manifest 中，必须在"Excluded Reason"列说明原因（如：该工具 command_combinations.json 中没有可 fuzz 的 file 类型参数，或所有参数都是内部路径不可替换为 @@）。不允许无故跳过。**
+生成 manifest 后，立即先写入容器，再用 Write 工具写入宿主机。**如果有任何 score ≥ 20 的 Rank 没有被包含在 manifest 中，必须在"Excluded Reason"列说明原因。不允许无故跳过。**
+
+**可被接受的排除理由：**
+- 该组合所有参数都是内部路径/输出路径，没有可替换为 `@@` 的文件输入参数
+- 该组合需要**多个文件参数**（如 `tool file1 file2 file3`），AFL 的 `@@` 只支持单个文件输入，wrapper 脚本会增加复杂度且收益有限
+- 该组合属于 help/version 等无需 fuzz 的 mode
+- command_combinations.json 中没有该工具的可 fuzz 条目
 
 ```bash
 # 写入容器
@@ -414,6 +433,12 @@ mkdir -p seeds_min
 afl-cmin -i seeds -o seeds_min -- $PROJ/target @@
 ```
 If `afl-cmin` produces empty output (all seeds crash or fail), fall back to using raw seeds without minimization — the target may need valid inputs to function.
+
+**注意：`afl-cmin` 必须用非 ASAN 二进制。** ASAN 的 shadow memory (~20TB 虚拟地址) 与 `-m 4096` 冲突会导致 fork server 卡死。如果有 `build_noasan` 目录，用那里的二进制：
+```bash
+afl-cmin -i seeds -o seeds_min -m 4096 -t 15000 -- $PROJ/build_noasan/src/target @@
+```
+如果没有非 ASAN 二进制，跳过 afl-cmin 直接使用原始种子。
 
 ### 4d. Create dictionary (optional but powerful)
 If the format has keywords, structure tokens, or magic bytes, create a dictionary file:
