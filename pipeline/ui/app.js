@@ -1,5 +1,7 @@
 let polling = true;
 let logAtBottom = true;
+let chartInstances = {};
+let _lastChartData = null;
 
 async function api(url, opts) {
   try { return await (await fetch(url, opts || {})).json(); }
@@ -17,6 +19,10 @@ function switchPage(pageName) {
   // Auto-load content when switching to certain pages
   if (pageName === 'report') {
     loadSummary();
+  }
+  if (pageName === 'dashboard' && _lastChartData) {
+    // Re-render charts after page becomes visible (canvases lose dimensions when hidden)
+    setTimeout(() => updateCharts(_lastChartData), 50);
   }
 }
 
@@ -43,6 +49,77 @@ async function loadSummary() {
   }
 }
 
+function updateCharts(d) {
+  const row = document.getElementById('chartsRow');
+  if (!d || !d.strategies || !d.strategies.length) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = 'grid';
+  // Force layout so canvases have valid dimensions
+  row.offsetHeight;
+
+  const names = d.strategies.map(s => s.name || '?');
+  const edges = d.strategies.map(s => parseInt(s.edge_found) || 0);
+  const crashes = d.strategies.map(s => parseInt(s.unique_crashes) || 0);
+  const speeds = d.strategies.map(s => {
+    const v = parseFloat(s.exec_speed);
+    return isNaN(v) ? 0 : v;
+  });
+
+  function niceScale(data, defaultMax, defaultStep) {
+    const max = Math.max(...data);
+    if (max <= 0) return { max: defaultMax, step: defaultStep };
+    if (max <= defaultMax) return { max: defaultMax, step: defaultStep };
+    const mag = Math.pow(10, Math.floor(Math.log10(max)));
+    const norm = max / mag;
+    const step = Math.max(1, Math.round(norm <= 2 ? mag / 5 : norm <= 5 ? mag / 2 : mag));
+    return { max: Math.ceil(max / step) * step, step };
+  }
+
+  function makeChart(id, label, data, color, bg, scale) {
+    if (chartInstances[id]) chartInstances[id].destroy();
+    const canvas = document.getElementById(id);
+    canvas.style.display = 'block';
+    const parent = canvas.parentElement;
+    // Set explicit canvas pixel dimensions based on parent size and DPR
+    const dpr = window.devicePixelRatio || 1;
+    const rect = parent.getBoundingClientRect();
+    const w = rect.width || parent.clientWidth || 200;
+    const h = rect.height || parent.clientHeight || 200;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    chartInstances[id] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: names, datasets: [{ label, data, backgroundColor: bg, borderColor: color, borderWidth: 1, borderRadius: 3, barPercentage: 0.2, categoryPercentage: 0.5 }] },
+      options: {
+        responsive: false, maintainAspectRatio: false, devicePixelRatio: 1,
+        animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 10, weight: '600' }, maxRotation: 0, autoSkip: false }, grid: { display: false } },
+          y: { beginAtZero: true, max: scale.max, ticks: { font: { size: 10, weight: '600' }, stepSize: scale.step }, grid: { color: '#eaeef2' } }
+        }
+      }
+    });
+  }
+
+  // Create charts sequentially with layout settling between each
+  function createSeq(idx) {
+    const charts = [
+      { id: 'chartEdges', label: 'Edges', data: edges, color: '#0969da', bg: 'rgba(9,105,218,0.6)', scale: niceScale(edges, 800, 100) },
+      { id: 'chartCrashes', label: 'Crashes', data: crashes, color: '#cf222e', bg: 'rgba(207,34,46,0.6)', scale: niceScale(crashes, 8, 1) },
+      { id: 'chartSpeed', label: 'Exec/s', data: speeds, color: '#d4940c', bg: 'rgba(212,148,12,0.6)', scale: niceScale(speeds, 80, 10) }
+    ];
+    if (idx >= charts.length) return;
+    makeChart(charts[idx].id, charts[idx].label, charts[idx].data, charts[idx].color, charts[idx].bg, charts[idx].scale);
+    setTimeout(() => createSeq(idx + 1), 30);
+  }
+  createSeq(0);
+}
+
 function updateDashboard() {
   const target = document.getElementById('targetSelect').value;
   loadManifest();
@@ -53,6 +130,8 @@ function updateDashboard() {
     document.getElementById('totalEdges').textContent = (d.total_edges||0).toLocaleString();
     document.getElementById('totalCrashes').textContent = (d.total_crashes||0).toLocaleString();
     document.getElementById('staleCount').textContent = d.stale_count || 0;
+    _lastChartData = d;
+    updateCharts(d);
 
     const running = d.pipeline_running || d.running;
     const gs = document.getElementById('globalStatus');
@@ -66,10 +145,11 @@ function updateDashboard() {
 
     // 按钮状态
     const noTarget = !document.getElementById('targetSelect').value;
+    const pipelineBusy = d.pipeline_running || false;
     document.getElementById('btnPhase1').disabled = running || noTarget;
     document.getElementById('btnPhase2').disabled = running || noTarget;
-    document.getElementById('btnPhase3').disabled = d.pipeline_running || noTarget;
-    document.getElementById('btnPhase4').disabled = running || noTarget;
+    document.getElementById('btnPhase3').disabled = pipelineBusy || noTarget;
+    document.getElementById('btnPhase4').disabled = pipelineBusy || noTarget;
     document.getElementById('btnPhase5').disabled = noTarget;
     document.getElementById('clsPhase1').disabled = noTarget;
     document.getElementById('clsPhase2').disabled = noTarget;
@@ -118,23 +198,23 @@ function updateDashboard() {
     }
 
     // 已终止策略表格（仅选了项目才显示）
-    const killedTitle = document.getElementById('killedTitle');
-    const killedTable = document.getElementById('killedTable');
+    const killedSection = document.getElementById('killedSection');
     const killedBody = document.getElementById('killedBody');
     const hasTarget = !!document.getElementById('targetSelect').value;
     if (hasTarget && d.killed && d.killed.length) {
-      killedTitle.style.display = 'block';
-      killedTable.style.display = 'table';
-      killedBody.innerHTML = d.killed.map(function(k) {
-        return '<tr><td><strong>' + (k.name||'?') + '</strong></td><td>' + (k.pid||'\u2014') + '</td><td>' + (k.edges||'0') + '</td><td>' + (k.crashes||'0') + '</td><td>' + (k.paths||'0') + '</td><td>' + (k.speed||'\u2014') + '</td><td>' + (k.cycles||'0') + '</td><td>' + (k.bitmap||'\u2014') + '</td><td>' + (k.runtime||'\u2014') + '</td></tr>';
+      killedSection.style.display = 'block';
+      killedBody.innerHTML = d.killed.map(function(k, idx) {
+        const expanded = window._expandedKilledRows && window._expandedKilledRows.has(idx);
+        const showCmd = expanded && k.full_cmd;
+        const cmdRow = k.full_cmd ? '<tr class="cmd-detail" id="killed_cmd_' + idx + '" style="' + (showCmd?'':'display:none;') + '"><td colspan="10"><pre>' + k.full_cmd + '</pre></td></tr>' : '';
+        return '<tr class="strategy-row" onclick="toggleKilledCmd(' + idx + ')"><td><span class="arrow ' + (showCmd?'open':'') + '" id="killed_arrow_' + idx + '">\u25b6</span></td><td><strong>' + (k.name||'?') + '</strong></td><td>' + (k.pid||'\u2014') + '</td><td>' + (k.edges||'0') + '</td><td>' + (k.crashes||'0') + '</td><td>' + (k.paths||'0') + '</td><td>' + (k.speed||'\u2014') + '</td><td>' + (k.cycles||'0') + '</td><td>' + (k.bitmap||'\u2014') + '</td><td>' + (k.runtime||'\u2014') + '</td></tr>' + cmdRow;
       }).join('');
     } else {
-      killedTitle.style.display = 'none';
-      killedTable.style.display = 'none';
+      killedSection.style.display = 'none';
     }
   });
 
-  api('/api/log').then(d => {
+  api('/api/log' + (target ? `?target=${encodeURIComponent(target)}` : '')).then(d => {
     if (d && d.log) {
       const box = document.getElementById('logBox');
       const wasAtBottom = logAtBottom;
@@ -159,6 +239,19 @@ function toggleCmd(idx) {
   }
 }
 
+function toggleKilledCmd(idx) {
+  const row = document.getElementById('killed_cmd_' + idx);
+  const arrow = document.getElementById('killed_arrow_' + idx);
+  if (row) {
+    const show = row.style.display !== 'table-row';
+    row.style.display = show ? 'table-row' : 'none';
+    if (arrow) arrow.className = 'arrow' + (show ? ' open' : '');
+    if (!window._expandedKilledRows) window._expandedKilledRows = new Set();
+    if (show) window._expandedKilledRows.add(idx);
+    else window._expandedKilledRows.delete(idx);
+  }
+}
+
 async function showSummary() {
   switchPage('report');
 }
@@ -166,9 +259,11 @@ async function showSummary() {
 async function loadManifest() {
   const target = document.getElementById('targetSelect').value;
   const panel = document.getElementById('strategyPanel');
+  const empty = document.getElementById('strategiesEmpty');
   const list = document.getElementById('strategyList');
   const count = document.getElementById('strategyCount');
-  if (!target) { panel.style.display = 'none'; return; }
+  if (!target) { panel.style.display = 'none'; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
   const prevChecked = new Set();
   document.querySelectorAll('.strategy-cb:checked').forEach(cb => prevChecked.add(cb.value));
   const d = await api(`/api/manifest?target=${encodeURIComponent(target)}`);
@@ -278,6 +373,7 @@ async function killStrategy(pid) {
     if (cells.length >= 2) {
       var rowPid = cells[2].textContent.trim();
       if (rowPid === String(pid)) {
+        var cmdRow = document.getElementById('cmd_' + i);
         strategyData = {
           name: cells[1].textContent.replace(/[\u26a0\u26a1].*$/, '').trim(),
           pid: pid,
@@ -287,7 +383,8 @@ async function killStrategy(pid) {
           speed: cells[6].textContent.trim(),
           cycles: cells[7].textContent.trim(),
           bitmap: cells[8].textContent.trim(),
-          runtime: cells[9].textContent.trim()
+          runtime: cells[9].textContent.trim(),
+          full_cmd: cmdRow ? cmdRow.querySelector('pre').textContent : ''
         };
         break;
       }

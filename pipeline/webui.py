@@ -340,6 +340,8 @@ def _load_killed(target: str):
             logger.info("[strategy] loaded %d killed strategies from %s", len(_killed_strategies), path)
         except Exception as e:
             logger.warning("[strategy] failed to load killed strategies: %s", e)
+    else:
+        _killed_strategies = []
 
 
 @app.post("/api/strategy/kill")
@@ -470,6 +472,7 @@ async def api_pipeline_stop():
             "cycles": s.get("cycles_done", "0"),
             "bitmap": s.get("bitmap_cvg", "\u2014"),
             "runtime": s.get("run_time", "\u2014"),
+            "full_cmd": s.get("full_cmd", ""),
             "killed_at": time.time(),
             "killed_by": "stop_all",
         }
@@ -527,14 +530,18 @@ async def api_projects():
 
 
 @app.get("/api/log")
-async def api_log():
+async def api_log(target: str = ""):
     log_dir = BASE_DIR / "outputs"
     if not log_dir.exists():
         return {"log": ""}
-    projs = sorted(log_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not projs:
-        return {"log": ""}
-    log_files = sorted((projs[0] / "log").glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if (projs[0] / "log").exists() else []
+    if target:
+        log_path = log_dir / target / "log"
+    else:
+        projs = sorted(log_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not projs:
+            return {"log": ""}
+        log_path = projs[0] / "log"
+    log_files = sorted(log_path.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if log_path.exists() else []
     if not log_files:
         return {"log": ""}
     with open(log_files[0], "r", encoding="utf-8", errors="replace") as f:

@@ -31,7 +31,6 @@
       <a class="nav-item" data-page="strategies"><span class="nav-icon">&#128203;</span> Strategies</a>
       <a class="nav-item" data-page="pipeline"><span class="nav-icon">&#9881;&#65039;</span> Pipeline</a>
       <a class="nav-item" data-page="report"><span class="nav-icon">&#128202;</span> Report</a>
-      <a class="nav-item" data-page="log"><span class="nav-icon">&#128221;</span> Log</a>
     </nav>
   </div>
 
@@ -46,30 +45,51 @@
         <div class="spacer"></div>
       </div>
 
-      <div class="section-title" style="margin-top:0;margin-bottom:12px;">Overview</div>
-      <div class="grid" id="statsGrid">
-        <div class="card"><div class="label">Total Strategies</div><div class="value blue" id="stratCount">—</div></div>
-        <div class="card"><div class="label">Active Processes</div><div class="value blue" id="procCount">—</div></div>
-        <div class="card"><div class="label">Edges Found</div><div class="value green" id="totalEdges">—</div></div>
-        <div class="card"><div class="label">Crashes</div><div class="value red" id="totalCrashes">—</div></div>
-        <div class="card"><div class="label">Stale (2h+)</div><div class="value" id="staleCount" style="color:#d4940c;">—</div></div>
+      <div class="dashboard-section">
+        <div class="section-title" style="margin-top:0;margin-bottom:12px;">Overview</div>
+        <div class="grid" id="statsGrid">
+          <div class="card"><div class="label">Total Strategies</div><div class="value blue" id="stratCount">—</div></div>
+          <div class="card"><div class="label">Active Processes</div><div class="value blue" id="procCount">—</div></div>
+          <div class="card"><div class="label">Edges Found</div><div class="value green" id="totalEdges">—</div></div>
+          <div class="card"><div class="label">Crashes</div><div class="value red" id="totalCrashes">—</div></div>
+          <div class="card"><div class="label">Stale (2h+)</div><div class="value" id="staleCount" style="color:#d4940c;">—</div></div>
+        </div>
       </div>
 
-      <div style="display:flex; align-items:center; gap:12px; margin:24px 0 14px;">
-        <div class="section-title" style="margin:0;">Active Strategies</div>
-        <span class="spacer" style="flex:1;"></span>
-        <button class="kill-btn" id="btnStopAll" onclick="stopAllStrategies()" style="display:none;">Stop All</button>
-      </div>
-      <table>
-        <thead><tr><th></th><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th><th></th></tr></thead>
-        <tbody id="strategiesBody"><tr><td colspan="11" style="text-align:center;color:#8b949e;">Waiting...</td></tr></tbody>
-      </table>
+      <div class="dashboard-section" id="activeSection">
+        <div style="display:flex; align-items:center; gap:12px; margin:0 0 14px;">
+          <div class="section-title" style="margin:0;">Active Strategies</div>
+          <span class="spacer" style="flex:1;"></span>
+          <button class="kill-btn" id="btnStopAll" onclick="stopAllStrategies()" style="display:none;">Stop All</button>
+        </div>
+        <table>
+          <thead><tr><th></th><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th><th></th></tr></thead>
+          <tbody id="strategiesBody"><tr><td colspan="11" style="text-align:center;color:#8b949e;">Waiting...</td></tr></tbody>
+        </table>
 
-      <div class="section-title" id="killedTitle" style="display:none;">Stopped Strategies</div>
-      <table id="killedTable" style="display:none;">
-        <thead><tr><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th></tr></thead>
-        <tbody id="killedBody"></tbody>
-      </table>
+        <div class="charts-row" id="chartsRow" style="display:none;">
+          <div class="chart-card">
+            <div class="chart-title">Edges per Strategy</div>
+            <div class="chart-container"><canvas id="chartEdges"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Crashes per Strategy</div>
+            <div class="chart-container"><canvas id="chartCrashes"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Exec Speed</div>
+            <div class="chart-container"><canvas id="chartSpeed"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-section" id="killedSection" style="display:none;">
+        <div class="section-title" style="margin:0 0 14px;">Stopped Strategies</div>
+        <table id="killedTable">
+          <thead><tr><th></th><th>Name</th><th>PID</th><th>Edges</th><th>Crashes</th><th>Paths</th><th>Speed</th><th>Cycles</th><th>Bitmap</th><th>Runtime</th></tr></thead>
+          <tbody id="killedBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- ===== Page: Strategies ===== -->
@@ -99,21 +119,25 @@
           </div>
         </div>
       </div>
-
+      <div id="strategiesEmpty" style="text-align:center;color:#8b949e;padding:80px 20px;font-size:15px;">
+        Select a target project to view and configure fuzzing strategies.
+      </div>
     </div>
 
     <!-- ===== Page: Pipeline ===== -->
     <div class="page" data-page="pipeline">
       <div class="section-title" style="margin-top:0;">Pipeline Controls</div>
       <div class="controls">
-        <div class="phase-group"><button class="btn-primary" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button><button class="phase-clear" id="clsPhase1" onclick="cleanPhase(1)" disabled>clear</button></div>
-        <div class="phase-group"><button class="btn-primary" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button><button class="phase-clear" id="clsPhase2" onclick="cleanPhase(2)" disabled>clear</button></div>
-        <div class="phase-group"><div class="tooltip-wrap"><button class="btn-primary" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div><button class="phase-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
-        <div class="phase-group"><button class="btn-primary" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="phase-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
-        <div class="phase-group"><button class="btn-secondary" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
-        <div><button class="btn-secondary" id="btnClean" onclick="cleanWorkspace()" style="border-color:#cf222e;color:#cf222e;">Clean All</button></div>
+        <div class="phase-group"><button class="sticky-note" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button><button class="phase-clear" id="clsPhase1" onclick="cleanPhase(1)" disabled>clear</button></div>
+        <div class="phase-group"><button class="sticky-note" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button><button class="phase-clear" id="clsPhase2" onclick="cleanPhase(2)" disabled>clear</button></div>
+        <div class="phase-group"><div class="tooltip-wrap"><button class="sticky-note" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div><button class="phase-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
+        <div class="phase-group"><button class="sticky-note" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="phase-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
+        <div class="phase-group"><button class="sticky-note" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
+        <div><button class="sticky-note" id="btnClean" onclick="cleanWorkspace()">Clean All</button></div>
         <span id="pipelineStatus" style="font-size:13px;color:#656d76;margin-left:8px;"></span>
       </div>
+      <div class="section-title">Pipeline Log</div>
+      <div class="log-box" id="logBox" style="max-height:none;min-height:400px;">(waiting for data...)</div>
     </div>
 
     <!-- ===== Page: Report ===== -->
@@ -136,17 +160,12 @@
       </div>
     </div>
 
-    <!-- ===== Page: Log ===== -->
-    <div class="page" data-page="log">
-      <div class="section-title" style="margin-top:0;">Pipeline Log</div>
-      <div class="log-box" id="logBox" style="max-height:none;min-height:400px;">(waiting for data...)</div>
-    </div>
-
   </div>
 </div>
 
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <!--SCRIPT-->
 </body>
 </html>
