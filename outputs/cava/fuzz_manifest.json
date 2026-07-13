@@ -1,0 +1,56 @@
+{
+  "project": "cava",
+  "build_dir": "/workspace/cava/build_afl",
+  "cmplog_build_dir": "/workspace/cava/build_cmplog",
+  "batch_size": 4,
+  "strategies": [
+    {
+      "id": "cava_raw_monstercat",
+      "name": "cava_raw_monstercat",
+      "analysis_tool": "cava",
+      "analysis_id": 1,
+      "vuln_score": 72,
+      "priority": "high",
+      "command": "TERM=xterm-256color afl-fuzz -i /workspace/fuzz_cava/seeds_raw_monstercat -o /workspace/fuzz_cava/out_raw_monstercat -m 4096 -t 10000 -p explore -- /workspace/cava/build_afl/cava -p @@",
+      "cmplog_binary": "/workspace/cava/build_cmplog/cava",
+      "seeds_dir": "seeds_raw_monstercat",
+      "desc": "Rank 1 (score 72): Config fuzzing with FIFO input + raw binary output + monstercat smoothing. Exercises config parsing, FFT pipeline, smoothing filter, and raw output code paths."
+    },
+    {
+      "id": "cava_raw_ascii",
+      "name": "cava_raw_ascii",
+      "analysis_tool": "cava",
+      "analysis_id": 5,
+      "vuln_score": 45,
+      "priority": "medium",
+      "command": "TERM=xterm-256color afl-fuzz -i /workspace/fuzz_cava/seeds_raw_ascii -o /workspace/fuzz_cava/out_raw_ascii -m 4096 -t 10000 -p explore -- /workspace/cava/build_afl/cava -p @@",
+      "cmplog_binary": "/workspace/cava/build_cmplog/cava",
+      "seeds_dir": "seeds_raw_ascii",
+      "desc": "Rank 5 (score 45): Config fuzzing with FIFO input + raw ASCII output. Exercises ASCII format code path with delimiter processing and format string vulnerabilities."
+    },
+    {
+      "id": "cava_waveform",
+      "name": "cava_waveform",
+      "analysis_tool": "cava",
+      "analysis_id": 6,
+      "vuln_score": 44,
+      "priority": "medium",
+      "command": "TERM=xterm-256color afl-fuzz -i /workspace/fuzz_cava/seeds_waveform -o /workspace/fuzz_cava/out_waveform -m 4096 -t 10000 -p explore -- /workspace/cava/build_afl/cava -p @@",
+      "cmplog_binary": "/workspace/cava/build_cmplog/cava",
+      "seeds_dir": "seeds_waveform",
+      "desc": "Rank 6 (score 44): Config fuzzing with FIFO input + waveform mode. Exercises waveform rendering path with direct PCM access."
+    },
+    {
+      "id": "cava_raw_default",
+      "name": "cava_raw_default",
+      "analysis_tool": "cava",
+      "analysis_id": 7,
+      "vuln_score": 35,
+      "priority": "low",
+      "command": "TERM=xterm-256color afl-fuzz -i /workspace/fuzz_cava/seeds_raw_default -o /workspace/fuzz_cava/out_raw_default -m 4096 -t 10000 -p explore -- /workspace/cava/build_afl/cava -p @@",
+      "cmplog_binary": "/workspace/cava/build_cmplog/cava",
+      "seeds_dir": "seeds_raw_default",
+      "desc": "Rank 7 (score 35): Config fuzzing with FIFO input + basic raw binary output. Exercises core config parsing and default FFT pipeline."
+    }
+  ]
+}

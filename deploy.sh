@@ -65,6 +65,7 @@ SKILLS_LIST=(
     "auto-fuzz-exec:auto-fuzz-exec/SKILL.md"
     "crash-reporter:crash-reporter/SKILL.md"
     "issue-generator:issue-generator/SKILL.md"
+    "easy-fuzz:easy-fuzz/SKILL.md"
 )
 
 echo "  Skills will be installed to: ${SKILLS_TARGET}/"

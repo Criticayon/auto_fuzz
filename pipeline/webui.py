@@ -26,7 +26,8 @@ _current_target: str | None = None
 _docker_client: docker.DockerClient | None = None
 _edge_history: dict[str, dict] = {}  # out_dir -> {"edges": int, "changed_at": float}
 _STALE_THRESHOLD = 7200  # 2 hours in seconds
-_killed_strategies: list[dict] = []  # 已终止的策略最终状态
+_killed_strategies: list[dict] = []
+_easyfuzz_enabled: bool = False  # EasyFuzz toggle state  # 已终止的策略最终状态
 
 
 def get_client() -> docker.DockerClient:
@@ -148,7 +149,7 @@ def list_projects() -> list[str]:
     projects = []
     for d in workspace.iterdir():
         if d.is_dir() and d.name not in ("auto_fuzz", "fuzz_pipeline", ".git", "__pycache__"):
-            if (d / "CMakeLists.txt").exists() or (d / "configure").exists() or (d / "Makefile").exists() or (d / "meson.build").exists():
+            if (d / "CMakeLists.txt").exists() or (d / "configure").exists() or (d / "configure.ac").exists() or (d / "Makefile").exists() or (d / "Makefile.am").exists() or (d / "meson.build").exists():
                 projects.append(d.name)
     return sorted(projects)
 
@@ -165,7 +166,7 @@ async def api_status(target: str = ""):
     stats = get_outdir_stats()
 
     # 切换目标时重新加载已终止策略
-    effective_target = _current_target or target
+    effective_target = target or _current_target
     if effective_target:
         _load_killed(effective_target)
 
@@ -223,7 +224,60 @@ async def api_status(target: str = ""):
         "stale_count": stale_count,
         "pipeline_running": _pipeline_proc is not None and _pipeline_proc.poll() is None,
         "current_target": _current_target,
+        "easyfuzz_enabled": _easyfuzz_enabled,
     }
+
+
+# ──────────────────────────────────────────────
+# EasyFuzz API
+# ──────────────────────────────────────────────
+
+
+@app.get("/api/easyfuzz/status")
+async def api_easyfuzz_status():
+    """返回 EasyFuzz toggle 状态。"""
+    return {"enabled": _easyfuzz_enabled}
+
+
+@app.post("/api/easyfuzz/toggle")
+async def api_easyfuzz_toggle(enabled: bool = False):
+    """设置 EasyFuzz toggle 状态。"""
+    global _easyfuzz_enabled
+    _easyfuzz_enabled = enabled
+    logger.info("[easyfuzz] toggled to %s", enabled)
+    return {"status": "ok", "enabled": enabled}
+
+
+@app.get("/api/easyfuzz/commands")
+async def api_easyfuzz_commands(target: str = ""):
+    """读取项目的 easy_fuzz_commands.json。"""
+    if not target:
+        return {"commands": []}
+    path = BASE_DIR / "outputs" / target / "easy_fuzz_commands.json"
+    if not path.exists():
+        return {"commands": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data
+    except Exception as e:
+        logger.warning("[easyfuzz] failed to read commands: %s", e)
+        return {"commands": []}
+
+
+@app.post("/api/easyfuzz/commands")
+async def api_easyfuzz_save_commands(target: str = "", request: Request = None):
+    """保存新的 easy_fuzz_commands.json。"""
+    if not target:
+        return {"error": "no target"}
+    body = await request.json()
+    path = BASE_DIR / "outputs" / target / "easy_fuzz_commands.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(body, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("[easyfuzz] commands saved for '%s' (%d commands)", target, len(body.get("commands", [])))
+    return {"status": "saved", "target": target}
+
+
+@app.post("/api/pipeline/start")
 
 
 def clean_workspace(target: str) -> dict:
@@ -281,12 +335,18 @@ async def api_phase_clean(target: str, phase: int):
     import shutil
 
     if phase == 1:
-        # Phase 1: 分析文件 + 容器源码
-        for f in ["analysis", "call_tree.json", "vulnerability_path_scores.md"]:
+        # Phase 1: 分析文件 + 种子 + 容器源码
+        for f in ["analysis", "command_combinations.json", "call_tree.md", "coverage_summary.md", "vulnerability_path_scores.md"]:
             p = host_dir / f
             if p.is_dir(): shutil.rmtree(str(p))
             elif p.exists(): p.unlink()
+        # 清理本地种子目录（在项目输出目录下 seeds_* 开头的目录）
+        for p in list(host_dir.glob("seeds_*")):
+            if p.is_dir():
+                shutil.rmtree(str(p))
+                logger.info("[clean] removed local seeds dir: %s", p.name)
         docker_exec(f"rm -rf /workspace/{project_name} 2>/dev/null || true")
+        docker_exec(f"rm -rf /workspace/fuzz_{project_name}/seeds_prebuilt 2>/dev/null || true")
         return {"status": "cleaned", "phase": 1, "target": project_name}
 
     elif phase == 2:
@@ -295,19 +355,21 @@ async def api_phase_clean(target: str, phase: int):
             for p in host_dir.glob(pat):
                 if p.is_dir(): shutil.rmtree(str(p))
                 elif p.exists(): p.unlink()
-        docker_exec(f"rm -rf /workspace/{project_name}/build* /workspace/fuzz_{project_name}/seeds* /workspace/fuzz_{project_name}/*.dict /workspace/fuzz_{project_name}/fuzz_manifest* /workspace/fuzz_{project_name}/target_metadata.sh /workspace/fuzz_{project_name}/fuzz_tool_list.md /workspace/fuzz_{project_name}/manifest_selfcheck.md 2>/dev/null || true")
+        docker_exec(f"rm -rf /workspace/{project_name}/build* /workspace/fuzz_{project_name}/seeds* /workspace/fuzz_{project_name}/*.dict /workspace/fuzz_{project_name}/fuzz_manifest* /workspace/fuzz_{project_name}/target_metadata.sh /workspace/fuzz_{project_name}/fuzz_tool_list.md /workspace/fuzz_{project_name}/manifest_selfcheck.md /workspace/fuzz_{project_name}/command_combinations.json /workspace/fuzz_{project_name}/call_tree.md /workspace/fuzz_{project_name}/coverage_summary.md /workspace/fuzz_{project_name}/vulnerability_path_scores.md 2>/dev/null || true")
         return {"status": "cleaned", "phase": 2, "target": project_name}
 
     elif phase == 3:
-        # Phase 3: 只清理 fuzz 输出（out_* 目录），保留预处理产物
+        # Phase 3: 清理 fuzz 输出 + selected manifest，保留预处理产物
         docker_exec(
             f"ps aux | grep afl-fuzz | grep '{project_name}' | grep -v grep "
             f"| awk '{{print $2}}' | xargs -r kill -9 2>/dev/null || true"
         )
         docker_exec(f"rm -rf /workspace/fuzz_{project_name}/out_* 2>/dev/null || true")
         docker_exec(f"rm -f /workspace/fuzz_{project_name}/fuzz_started.signal 2>/dev/null || true")
-        p = host_dir / "killed_strategies.json"
-        if p.exists(): p.unlink()
+        docker_exec(f"rm -f /workspace/fuzz_{project_name}/fuzz_manifest_selected.json 2>/dev/null || true")
+        for f in ["killed_strategies.json", "fuzz_manifest_selected.json"]:
+            p = host_dir / f
+            if p.exists(): p.unlink()
         return {"status": "cleaned", "phase": 3, "target": project_name}
 
     elif phase == 4:
@@ -444,6 +506,8 @@ async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86
         return {"error": "pipeline already running"}
     target_path = str(BASE_DIR.parent / target)
     cmd = ["python", "-m", "pipeline.orchestrator", target_path, "--phase", str(phase)]
+    if _easyfuzz_enabled:
+        cmd.append("--easyfuzz")
     if phase == 2:
         cmd.extend(["--fuzz-timeout", str(fuzz_timeout)])
     _pipeline_proc = subprocess.Popen(

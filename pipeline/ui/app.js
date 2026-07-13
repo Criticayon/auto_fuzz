@@ -20,6 +20,13 @@ function switchPage(pageName) {
   if (pageName === 'report') {
     loadSummary();
   }
+  if (pageName === 'pipeline') {
+    updateSelectedInfo();
+    // Load EasyFuzz commands when switching to pipeline
+    if (document.getElementById('easyfuzzToggle').checked) {
+      loadEasyFuzzCommands();
+    }
+  }
   if (pageName === 'dashboard' && _lastChartData) {
     // Re-render charts after page becomes visible (canvases lose dimensions when hidden)
     setTimeout(() => updateCharts(_lastChartData), 50);
@@ -130,8 +137,29 @@ function updateDashboard() {
     document.getElementById('totalEdges').textContent = (d.total_edges||0).toLocaleString();
     document.getElementById('totalCrashes').textContent = (d.total_crashes||0).toLocaleString();
     document.getElementById('staleCount').textContent = d.stale_count || 0;
+
+    // 左下角过期策略通知
+    const staleNotify = document.getElementById('staleNotify');
+    const staleList = document.getElementById('staleList');
+    const staleStrats = (d.strategies||[]).filter(s => s.stale).map(s => s.name);
+    if (target && staleStrats.length) {
+      staleList.innerHTML = staleStrats.map(n => '<div class="sn-item">' + n + '</div>').join('');
+      staleNotify.style.display = 'block';
+    } else {
+      staleNotify.style.display = 'none';
+    }
+
     _lastChartData = d;
     updateCharts(d);
+
+    // Sync EasyFuzz toggle with server state
+    if (d.easyfuzz_enabled !== undefined) {
+      const toggle = document.getElementById('easyfuzzToggle');
+      if (toggle.checked !== d.easyfuzz_enabled) {
+        toggle.checked = d.easyfuzz_enabled;
+        updateEasyFuzzUI(d.easyfuzz_enabled);
+      }
+    }
 
     const running = d.pipeline_running || d.running;
     const gs = document.getElementById('globalStatus');
@@ -146,11 +174,12 @@ function updateDashboard() {
     // 按钮状态
     const noTarget = !document.getElementById('targetSelect').value;
     const pipelineBusy = d.pipeline_running || false;
+    const easyfuzzOn = document.getElementById('easyfuzzToggle').checked;
     document.getElementById('btnPhase1').disabled = running || noTarget;
     document.getElementById('btnPhase2').disabled = running || noTarget;
-    document.getElementById('btnPhase3').disabled = pipelineBusy || noTarget;
-    document.getElementById('btnPhase4').disabled = pipelineBusy || noTarget;
-    document.getElementById('btnPhase5').disabled = noTarget;
+    document.getElementById('btnPhase3').disabled = pipelineBusy || noTarget || easyfuzzOn;
+    document.getElementById('btnPhase4').disabled = pipelineBusy || noTarget || easyfuzzOn;
+    document.getElementById('btnPhase5').disabled = noTarget || easyfuzzOn;
     document.getElementById('clsPhase1').disabled = noTarget;
     document.getElementById('clsPhase2').disabled = noTarget;
     document.getElementById('clsPhase3').disabled = noTarget;
@@ -169,13 +198,13 @@ function updateDashboard() {
     const aLabel = document.getElementById('activityLabel');
     if (d.current_target) {
       pBar.style.display = 'flex';
+      pBar.className = 'project-bar' + (running ? ' running' : '');
       pName.textContent = d.current_target;
       if (running) {
         aFill.className = 'fill active';
         aLabel.textContent = d.pipeline_running ? 'Pipeline Running...' : 'Fuzzing...';
       } else {
-        aFill.className = 'fill';
-        aFill.style.width = d.running ? '60%' : '0%';
+        aFill.className = 'fill idle';
         aLabel.textContent = d.running ? 'Fuzzing' : 'Idle';
       }
     } else {
@@ -269,27 +298,39 @@ async function loadManifest() {
   const d = await api(`/api/manifest?target=${encodeURIComponent(target)}`);
   if (d && d.strategies && d.strategies.length) {
     panel.style.display = 'block';
+    document.getElementById('strategiesNoPhase2').style.display = 'none';
+    document.getElementById('strategiesRefSection').style.display = '';
+    document.getElementById('strategiesStartSection').style.display = '';
+    document.getElementById('strategyList').style.display = '';
+    document.getElementById('selectAllLabel').style.display = '';
     count.textContent = `${d.strategies.length} available (batch_size=${d.batch_size||4})`;
     list.innerHTML = d.strategies.map(s => {
       const wasChecked = prevChecked.has(String(s.id));
       const p = s.priority||'medium';
       const pBg = {critical:'#e1e4e8', high:'#ffebe9', medium:'#fff8c5', low:'#dafbe1'}[p]||'#fff8c5';
       const pFg = {critical:'#000000', high:'#cf222e', medium:'#9a6700', low:'#1a7f37'}[p]||'#9a6700';
-      return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;">
-        <input type="checkbox" class="strategy-cb" value="${s.id}" ${wasChecked?'checked':''} onchange="updateSelectAll()" style="margin-top:3px;">
+      return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:#fefcf8;border:1px solid #d0d7de;border-radius:6px;">
+        <input type="checkbox" class="strategy-cb" value="${s.id}" data-name="${s.name||'id_'+s.id}" ${wasChecked?'checked':''} onchange="updateSelectAll()" style="margin-top:3px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <strong style="font-size:14px;">${s.name||'id_'+s.id}</strong>
             <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:${pBg};color:${pFg};">${p}</span>
             <span style="font-size:11px;color:#656d76;">score: ${s.vuln_score||'?'}</span>
+            <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:#ddf4ff;color:#0969da;">cvg: ${s.expected_cvg||'?'}%</span>
           </div>
-          <div style="font-family:'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace;font-size:12px;color:#24292f;background:#ffffff;padding:8px 12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;line-height:1.5;">${s.command||'N/A'}</div>
+          <div style="font-family:'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace;font-size:12px;color:#24292f;background:#faf5ed;padding:8px 12px;border-radius:4px;white-space:pre-wrap;word-break:break-all;line-height:1.5;">${s.command||'N/A'}</div>
         </div>
       </div>`;
     }).join('');
     updateSelectAll();
   } else {
-    panel.style.display = 'none';
+    panel.style.display = 'block';
+    document.getElementById('strategiesNoPhase2').style.display = 'block';
+    document.getElementById('strategiesRefSection').style.display = 'none';
+    document.getElementById('strategiesStartSection').style.display = 'none';
+    document.getElementById('strategyList').style.display = 'none';
+    document.getElementById('selectAllLabel').style.display = 'none';
+    count.textContent = '';
   }
 }
 
@@ -306,6 +347,40 @@ function updateSelectAll() {
 
 function getSelectedStrategyIds() {
   return Array.from(document.querySelectorAll('.strategy-cb:checked')).map(cb => cb.value).join(',');
+}
+
+function getSelectedStrategyNames() {
+  return Array.from(document.querySelectorAll('.strategy-cb:checked')).map(cb => cb.getAttribute('data-name'));
+}
+
+function startFuzzFromStrategies() {
+  const names = getSelectedStrategyNames();
+  if (!names.length) return;
+  // Save selected info to display on Pipeline page
+  window._selectedNames = names;
+  window._selectedRef = document.getElementById('refEnabled').checked ? document.getElementById('refTextInput').value.trim() : '';
+  switchPage('pipeline');
+  updateSelectedInfo();
+}
+
+function updateSelectedInfo() {
+  const info = document.getElementById('selectedInfo');
+  const names = window._selectedNames || [];
+  const ref = window._selectedRef || '';
+  if (!names.length) { info.style.display = 'none'; return; }
+  info.style.display = 'block';
+  document.getElementById('selectedInfoCount').textContent = names.length + ' selected';
+  document.getElementById('selectedInfoList').innerHTML = names.map(n =>
+    '<span class="tag">' + n + '</span>'
+  ).join('');
+  const refEl = document.getElementById('selectedInfoRef');
+  const refText = document.getElementById('selectedInfoRefText');
+  if (ref) {
+    refEl.style.display = 'block';
+    refText.textContent = ref.length > 120 ? ref.slice(0, 120) + '...' : ref;
+  } else {
+    refEl.style.display = 'none';
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -333,7 +408,7 @@ async function startPipeline(phase) {
   status.textContent = 'Starting...';
   status.style.color = '#9a6700';
 
-  if (phase === 3) {
+  if (phase === 3 && !document.getElementById('easyfuzzToggle').checked) {
     const refEnabled = document.getElementById('refEnabled').checked;
     const ids = getSelectedStrategyIds();
     if (!ids && !refEnabled) { alert('Please select at least one strategy.'); btn.disabled = false; return; }
@@ -518,6 +593,185 @@ async function loadRefContext() {
     document.getElementById('refEnabled').checked = r.enabled !== false;
   }
 }
+
+// ──────────────────────────────────────────────
+// EasyFuzz Functions
+// ──────────────────────────────────────────────
+
+async function onEasyFuzzToggle() {
+  const enabled = document.getElementById('easyfuzzToggle').checked;
+  await api('/api/easyfuzz/toggle?enabled=' + enabled, {method:'POST'});
+  updateEasyFuzzUI(enabled);
+}
+
+function updateEasyFuzzUI(enabled) {
+  const panel = document.getElementById('easyfuzzCommandPanel');
+  if (panel) panel.style.display = enabled ? 'block' : 'none';
+
+  // Show/hide Strategies nav item
+  const stratNav = document.querySelector('.nav-item[data-page="strategies"]');
+  if (stratNav) stratNav.style.display = enabled ? 'none' : '';
+
+  // Update phase button labels
+  const btn1 = document.getElementById('btnPhase1');
+  const btn2 = document.getElementById('btnPhase2');
+  const btn3 = document.getElementById('btnPhase3');
+  const btn4 = document.getElementById('btnPhase4');
+  const btn5 = document.getElementById('btnPhase5');
+  const cls3 = document.getElementById('clsPhase3');
+  const cls4 = document.getElementById('clsPhase4');
+  if (enabled) {
+    btn1.textContent = 'Phase 1: Easy-Fuzz';
+    btn2.textContent = 'Phase 2: Issues';
+    btn3.style.display = 'none';
+    btn4.style.display = 'none';
+    btn5.style.display = 'none';
+    if (cls3) cls3.style.display = 'none';
+    if (cls4) cls4.style.display = 'none';
+    document.getElementById('selectAllLabel') && (document.getElementById('selectAllLabel').style.display = 'none');
+    document.getElementById('strategiesStartSection') && (document.getElementById('strategiesStartSection').style.display = 'none');
+  } else {
+    btn1.textContent = 'Phase 1: Analyze';
+    btn2.textContent = 'Phase 2: Prep';
+    btn3.style.display = '';
+    btn4.style.display = '';
+    btn5.style.display = '';
+    if (cls3) cls3.style.display = '';
+    if (cls4) cls4.style.display = '';
+    document.getElementById('selectAllLabel') && (document.getElementById('selectAllLabel').style.display = '');
+    document.getElementById('strategiesStartSection') && (document.getElementById('strategiesStartSection').style.display = '');
+  }
+
+  if (enabled && document.getElementById('targetSelect').value) {
+    loadEasyFuzzCommands();
+  }
+}
+
+async function loadEasyFuzzCommands() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const d = await api(`/api/easyfuzz/commands?target=${encodeURIComponent(target)}`);
+  const list = document.getElementById('easyfuzzCmdList');
+  const select = document.getElementById('easyfuzzCmdSelect');
+  const editor = document.getElementById('easyfuzzCmdEditor');
+
+  if (!d || !d.commands || !d.commands.length) {
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#656d76;font-size:13px;">No commands saved yet. Run EasyFuzz Phase 1 first.</div>';
+    editor.style.display = 'none';
+    return;
+  }
+
+  list.innerHTML = d.commands.map(function(c, idx) {
+    const crashInfo = c.crashes_found !== undefined ? 'crashes: ' + c.crashes_found : '';
+    return '<div style="background:#fefcf8;border:1px solid #d0d7de;border-radius:6px;padding:10px 14px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+        '<strong style="font-size:13px;">#' + (idx+1) + ' ' + (c.name || 'strategy_' + c.id) + '</strong>' +
+        (c.description ? '<span style="font-size:11px;color:#656d76;">— ' + c.description + '</span>' : '') +
+        (crashInfo ? '<span style="font-size:11px;color:#cf222e;margin-left:auto;">' + crashInfo + '</span>' : '') +
+      '</div>' +
+      '<div style="font-family:\'Cascadia Code\',\'JetBrains Mono\',Consolas,monospace;font-size:11px;color:#24292f;background:#faf5ed;padding:6px 10px;border-radius:4px;white-space:pre-wrap;word-break:break-all;line-height:1.4;">' + (c.command || c.cmd || 'N/A') + '</div>' +
+    '</div>';
+  }).join('');
+
+  // Populate the edit dropdown
+  select.innerHTML = '<option value="">-- Select a command to edit --</option>' +
+    d.commands.map(function(c, idx) {
+      return '<option value="' + idx + '">#' + (idx+1) + ' ' + (c.name || 'strategy_' + c.id) + '</option>';
+    }).join('');
+  editor.style.display = 'block';
+  document.getElementById('easyfuzzCmdTextarea').value = '';
+}
+
+function onEasyFuzzCmdSelect() {
+  const select = document.getElementById('easyfuzzCmdSelect');
+  const textarea = document.getElementById('easyfuzzCmdTextarea');
+  const idx = parseInt(select.value);
+  if (isNaN(idx)) { textarea.value = ''; return; }
+  // We need to fetch the commands again to get the full data
+  const target = document.getElementById('targetSelect').value;
+  api(`/api/easyfuzz/commands?target=${encodeURIComponent(target)}`).then(d => {
+    if (d && d.commands && d.commands[idx]) {
+      textarea.value = d.commands[idx].command || d.commands[idx].cmd || '';
+    }
+  });
+}
+
+async function saveEasyFuzzCommand() {
+  const target = document.getElementById('targetSelect').value;
+  const select = document.getElementById('easyfuzzCmdSelect');
+  const textarea = document.getElementById('easyfuzzCmdTextarea');
+  const saved = document.getElementById('easyfuzzCmdSaved');
+  const idx = parseInt(select.value);
+  if (isNaN(idx) || !target || !textarea.value.trim()) return;
+
+  const d = await api(`/api/easyfuzz/commands?target=${encodeURIComponent(target)}`);
+  if (d && d.commands && d.commands[idx]) {
+    d.commands[idx].command = textarea.value.trim();
+    if (!d.commands[idx].cmd) d.commands[idx].cmd = d.commands[idx].command;
+    await api('/api/easyfuzz/commands?target=' + encodeURIComponent(target), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(d)
+    });
+    saved.style.display = 'inline';
+    setTimeout(function() { saved.style.display = 'none'; }, 2000);
+    loadEasyFuzzCommands();
+  }
+}
+
+async function addNewEasyFuzzCommand() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const newCmd = prompt('Enter the new afl-fuzz command:');
+  if (!newCmd || !newCmd.trim()) return;
+  const name = prompt('Enter a name for this strategy (optional):') || 'custom_' + Date.now();
+
+  const d = await api(`/api/easyfuzz/commands?target=${encodeURIComponent(target)}`);
+  const commands = (d && d.commands) ? d.commands : [];
+  commands.push({
+    id: commands.length + 1,
+    name: name,
+    description: 'User-added custom strategy',
+    command: newCmd.trim(),
+    output_dir: 'out_' + name,
+    timestamp: new Date().toISOString()
+  });
+  d.commands = commands;
+  await api('/api/easyfuzz/commands?target=' + encodeURIComponent(target), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(d)
+  });
+  loadEasyFuzzCommands();
+}
+
+async function reRunEasyFuzzCommand() {
+  const target = document.getElementById('targetSelect').value;
+  const select = document.getElementById('easyfuzzCmdSelect');
+  const textarea = document.getElementById('easyfuzzCmdTextarea');
+  const idx = parseInt(select.value);
+  if (isNaN(idx) || !target || !textarea.value.trim()) {
+    alert('Please select and edit a command first.');
+    return;
+  }
+  if (!confirm('Re-run EasyFuzz Phase 1 with the modified command?')) return;
+
+  // Save the modified command first
+  await saveEasyFuzzCommand();
+
+  // Start Phase 1 with EasyFuzz mode
+  await startPipeline(1);
+}
+
+// Patch updateDashboard to handle EasyFuzz mode
+const _origUpdateSelectedInfo = updateSelectedInfo;
+updateSelectedInfo = function() {
+  _origUpdateSelectedInfo();
+  // If EasyFuzz enabled, load commands
+  if (document.getElementById('easyfuzzToggle').checked) {
+    loadEasyFuzzCommands();
+  }
+};
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('targetSelect').addEventListener('change', () => {

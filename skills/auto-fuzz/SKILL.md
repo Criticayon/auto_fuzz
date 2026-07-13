@@ -84,6 +84,13 @@ apt-get install -y -qq <package-name> 2>/dev/null || \
 
 ### Autotools (./configure)
 
+If `./configure` doesn't exist (e.g. git clone with only `configure.ac`), generate it first:
+```bash
+cd "$PROJ"
+autoreconf -fi
+cd ..
+```
+
 ASAN 构建用 `afl-clang-fast`（LTO + ASAN 容易链接冲突）：
 ```bash
 cd "$PROJ"
@@ -253,7 +260,7 @@ for f in command_combinations.json vulnerability_path_scores.md call_tree.md cov
 done
 ```
 
-从 `command_combinations.json` 提取各组合的 command 和 action，从 `vulnerability_path_scores.md` 获取优先级排序。
+从 `command_combinations.json` 提取各组合的 command 和 action，从 `vulnerability_path_scores.md` 获取漏洞分数（Vuln. Score）和预期覆盖率（Est. Coverage）用于优先级排序和 manifest 生成。
 
 ---
 
@@ -331,7 +338,14 @@ cat /workspace/fuzz_<project>/manifest_selfcheck.md
 
 ### 策略参数规则
 
-manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组合的**所有参数**。输入文件替换为 `@@`，输出文件替换为 `/dev/null`，其余**一个不能少，一个不能改**。
+manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组合的**所有参数**。其余**一个不能少，一个不能改**。
+
+**文件参数替换规则：**
+- **输入文件**（被 fuzz 的那个）→ 替换为 `@@`
+- **输出文件**（如 `-o`, `>` 重定向目标）→ 替换为 `/dev/null`
+- **非 fuzz 的输入文件**（工具需要读取的额外输入文件）→ **禁止使用 `/dev/null`**，改为指向 seeds 目录下的一个有效种子文件，如 `seeds/seed_01.json`
+
+> 注意：如果目标同时有 `@@` 位置和其他输入文件参数（如 jq 的 `-f <filter>` + `<json_file>`），非 `@@` 的输入文件要用真实种子文件代替，不能填 `/dev/null`，否则该路径的代码永远无法被覆盖到。
 
 **常见错误：模型倾向"简化"命令，丢掉看似"不重要"的 flag。这是不允许的。**
 
@@ -347,6 +361,11 @@ manifest 的 `command` 字段必须保留 vulnerability_path_scores.md 中该组
 错误 3（只留了工具名，丢掉所有选项）：
   analysis:  <tool> -c -k -l <N> -d <float> -p <path> -J <out> <arg>
   manifest:  <tool> @@            ← 所有选项都没了！
+
+错误 4（非 fuzz 输入文件填 /dev/null）：
+  analysis:  <tool> -f <filter_file> --name 'val' <input_file>
+  manifest:  <tool> -f @@ --name 'val' /dev/null   ← ❌ input_file 是输入文件，不能用 /dev/null
+  正确:      <tool> -f @@ --name 'val' seeds/sample.ext  ← ✅ 用真实种子文件
 ```
 
 ### 分数→优先级映射规则
@@ -387,6 +406,7 @@ manifest JSON 语法参考（仅展示结构，条目数量根据实际 analysis
       "analysis_tool": "<tool>",
       "analysis_id": <N>,
       "vuln_score": <score>,
+      "expected_cvg": <score>,
       "priority": "<critical|high|medium|low>",
       "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color afl-fuzz ... -- /workspace/<proj>/build_afl/<tool> <params> @@",
       "cmplog_binary": "/workspace/<proj>/build_cmplog/<tool>",
@@ -397,6 +417,14 @@ manifest JSON 语法参考（仅展示结构，条目数量根据实际 analysis
 }
 ```
 
+After generating `fuzz_manifest.json`, create the expected_cvg lookup table used during monitoring:
+
+```bash
+# Create expected_cvg mapping for monitoring (name=expected_cvg)
+jq -r '.strategies[] | "\(.name)=\(.expected_cvg)"' fuzz_manifest.json > /tmp/expected_cvg_map.txt
+cat /tmp/expected_cvg_map.txt
+```
+
 如果没有 CMPLOG 二进制，就不填 `cmplog_binary` 字段。
 
 **再次确认：如果在 Step 3 自检中发现遗漏，必须回头补上，不能跳过。**
@@ -405,9 +433,48 @@ manifest JSON 语法参考（仅展示结构，条目数量根据实际 analysis
 
 ## Phase 4: Corpus Generation
 
-Source seed inputs in priority order:
+### 4a. Use Phase 1 seeds if available (优先)
 
-### 4a. Extract from project tests (best)
+Phase 1 的 program-analysis skill 可能已经为各策略生成了定制种子，存放在 `seeds_prebuilt/` 目录下。先检查并优先使用这些种子：
+
+```bash
+# 检查是否有 Phase 1 预生成的种子
+if [ -d "seeds_prebuilt" ] && [ "$(ls -A seeds_prebuilt/ 2>/dev/null)" ]; then
+  echo "=== Using Phase 1 prebuilt seeds ==="
+  ls -la seeds_prebuilt/*/
+
+  # 遍历 manifest 中的每个策略，为它匹配最合适的 Phase 1 种子目录
+  for strategy in $(python3 -c "
+import json
+m = json.load(open('fuzz_manifest.json'))
+for s in m['strategies']:
+    print(f\"{s['seeds_dir']}|{s.get('name','')}\")
+"); do
+    sd=$(echo "$strategy" | cut -d'|' -f1)
+    name=$(echo "$strategy" | cut -d'|' -f2)
+    # 如果该策略的 seeds_dir 尚未创建，从 seeds_prebuilt 中查找匹配的种子
+    if [ ! -d "$sd" ] || [ -z "$(ls -A "$sd" 2>/dev/null)" ]; then
+      # 尝试按 combo_id、工具名等匹配
+      matched=$(find seeds_prebuilt -maxdepth 1 -type d -name "*${name}*" -o -name "*${sd}*" 2>/dev/null | head -1)
+      if [ -n "$matched" ] && [ -d "$matched" ]; then
+        mkdir -p "$sd"
+        cp -r "$matched"/* "$sd/"
+        echo "  $name: using Phase 1 seeds from $matched"
+      else
+        echo "  $name: no matching Phase 1 seeds, will generate later"
+      fi
+    fi
+  done
+else
+  echo "=== No Phase 1 prebuilt seeds found, generating from scratch ==="
+fi
+```
+
+如果 `seeds_prebuilt/` 中存在匹配的种子，就优先用它们。对于没有匹配种子的策略，继续用下面的常规方法生成。
+
+### 4b. Extract from project tests (best)
+
+Source seed inputs in priority order:
 ```bash
 # Find test input files (under $PROJ/)
 find "$PROJ" -type f \( -name "*.txt" -o -name "*.bin" -o -name "*.dat" -o -name "*.xml" -o -name "*.json" -o -name "*.conf" \) -path "*/test*" 2>/dev/null
@@ -418,7 +485,7 @@ mkdir -p seeds
 cp $(find "$PROJ" -type f -path "*/test*" -name "*.txt") seeds/ 2>/dev/null
 ```
 
-### 4b. Generate minimal valid inputs manually
+### 4c. Generate minimal valid inputs manually
 If no test data exists, create the smallest valid input for the target format. For example:
 - Markdown/HTML parser: create a minimal valid document
 - Config parser: create a minimal config file
@@ -427,7 +494,7 @@ If no test data exists, create the smallest valid input for the target format. F
 
 If a strategy from Phase 3 needs a **different seed format** (e.g. JPEG seeds for a JPEG decode strategy), create a separate seed directory for it (e.g. `seeds_jpeg/`).
 
-### 4c. Deduplicate and minimize corpus
+### 4d. Deduplicate and minimize corpus
 ```bash
 mkdir -p seeds_min
 afl-cmin -i seeds -o seeds_min -- $PROJ/target @@
@@ -440,7 +507,7 @@ afl-cmin -i seeds -o seeds_min -m 4096 -t 15000 -- $PROJ/build_noasan/src/target
 ```
 如果没有非 ASAN 二进制，跳过 afl-cmin 直接使用原始种子。
 
-### 4d. Create dictionary (optional but powerful)
+### 4e. Create dictionary (optional but powerful)
 If the format has keywords, structure tokens, or magic bytes, create a dictionary file:
 ```bash
 # afl++ dictionary format:
@@ -542,8 +609,9 @@ echo $! > out_cmplog/pid
 Check **all strategy output dirs** to get the full picture:
 
 ```bash
-# Summary across all strategies
+# Summary across all strategies — include expected_cvg from manifest
 for d in out_*/; do
+  name=$(basename "$d")
   echo "=== $(basename $d) ==="
   grep -E "edge_found|unique_crashes|paths_total|exec_speed" "$d/fuzzer_stats" 2>/dev/null || echo "  (no stats)"
 done

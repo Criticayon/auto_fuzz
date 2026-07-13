@@ -53,6 +53,7 @@ The manifest has the following structure:
       "name": "strategy_name",
       "command": "afl-fuzz -M main -i seeds -o out_id5 -m 4096 -t 10000 -p explore -- $PROJ/target @@",
       "vuln_score": 78,
+      "expected_cvg": 40,
       "priority": "critical",
       "seed_dir": "seeds",
       "output_dir": "out_id5",
@@ -226,6 +227,91 @@ done
 
 如果某个策略超过 60 秒仍未生成 `fuzzer_stats`，打印 warning 并输出其 fuzz.log 尾部，但不阻塞整体退出。
 
+### 3c. Initial Coverage Check & Seed Tuning
+
+After stable stats are confirmed, check each strategy's `bitmap_cvg` (AFL++ bitmap fill %). If it's below 1%, the seeds barely hit any code paths — the agent must study the strategy's command and craft targeted seeds.
+
+| bitmap_cvg | Meaning | Action |
+|---|---|---|
+| ≥ 1% | ✅ Normal startup coverage | 继续 |
+| < 1% | 🚨 种子未命中目标路径 | 根据命令参数重新设计种子 |
+
+```bash
+# Check each strategy: flag if bitmap_cvg < 1%
+for strategy in $(python3 -c "
+import json
+m = json.load(open('$MANIFEST'))
+for s in m['strategies']:
+    print(f\"{s['name']}={s.get('output_dir','out_'+s['name'])}\")
+"); do
+  name=$(echo $strategy | cut -d= -f1)
+  outdir=$(echo $strategy | cut -d= -f2)
+  stats="/workspace/fuzz_<project>/${outdir}/fuzzer_stats"
+  if [ -f "$stats" ]; then
+    bitmap_cvg=$(grep "bitmap_cvg" "$stats" | cut -d: -f2 | tr -d ' %' || echo "0")
+    echo "$name: bitmap_cvg = ${bitmap_cvg}%"
+    if [ "$(echo "$bitmap_cvg < 1" | bc 2>/dev/null || echo 0)" -eq 1 ]; then
+      echo "$name" >> /tmp/underperforming_strategies.txt
+    fi
+  fi
+done
+```
+
+For each strategy listed in `/tmp/underperforming_strategies.txt`, enter the **seed tuning loop** (up to 10 attempts). The loop only exits when `bitmap_cvg >= 1%` or all 10 attempts are exhausted.
+
+Each attempt must:
+1. **Study the strategy command** from the manifest — what flags/params does it use?
+2. **Read `vulnerability_path_scores.md`** to identify the specific functions targeted by this strategy's parameter combination
+3. **Find the matching `call_tree.md` code paths** — understand what input format can reach those functions
+4. **Craft targeted seed files and stdin inputs** — for parser tools: valid format files; for config-driven tools: config files that trigger specific options; for filelist inputs: properly structured list files. Both seed files AND stdin input files can be created/modified.
+5. **Verify bitmap_cvg after restart** — if still < 1%, retry with deeper analysis
+
+```bash
+# Seed tuning loop per strategy
+for name in $(cat /tmp/underperforming_strategies.txt); do
+  retry_file="/tmp/${name}_retry"
+  retries=$(cat "$retry_file" 2>/dev/null || echo "0")
+
+  if [ "$retries" -ge 10 ]; then
+    echo "$name: all 10 attempts exhausted, keeping best result"
+    continue
+  fi
+
+  echo "$name: crafting targeted seeds (attempt $((retries+1))/10)"
+
+  # Step 1: Study the strategy command and vulnerability_path_scores.md
+  # - What flags/params does this command use?
+  # - Find the specific functions listed in vulnerability_path_scores.md
+  # - Look up call_tree.md for those functions' code paths
+
+  # Step 2: Create targeted seed inputs that exercise those specific functions
+  # - Seed files (*.cfg, *.txt, etc.): craft valid inputs that trigger the target flags/params
+  # - Stdin inputs: create/modify stdin test data that reaches the target code paths
+  # - Both seed files AND stdin inputs can be used simultaneously
+  # - Place crafted inputs in the strategy's seed directory
+
+  # Step 3: Restart afl-fuzz with expanded seeds
+  container_exec command="cp -r /workspace/fuzz_<project>/crafted_seeds/* /workspace/fuzz_<project>/seeds/" workdir="..."
+  # Restart the strategy...
+
+  echo $((retries + 1)) > "$retry_file"
+
+  # Step 4: Wait for stats and check bitmap_cvg
+  sleep 5
+  new_stats="/workspace/fuzz_<project>/${outdir}/fuzzer_stats"
+  if [ -f "$new_stats" ]; then
+    new_cvg=$(grep "bitmap_cvg" "$new_stats" | cut -d: -f2 | tr -d ' %' || echo "0")
+    echo "$name: bitmap_cvg now = ${new_cvg}%"
+    if [ "$(echo "$new_cvg >= 1" | bc 2>/dev/null || echo 0)" -eq 1 ]; then
+      echo "$name: reached 1% threshold, moving on"
+      break
+    fi
+  fi
+done
+```
+
+After the tuning loop (or if no strategies need tuning), proceed to signal completion.
+
 ---
 
 ## Step 4: Signal Completion
@@ -255,8 +341,9 @@ The agent should then **exit cleanly**. Do not wait, do not monitor, do not chec
 
 - Do NOT implement stagnation detection or batch advancement
 - Do NOT clean up afl-fuzz processes
-- Do NOT wait for fuzzing to complete (only wait for fuzzer_stats to appear)
+- Do NOT wait for fuzzing to complete (only wait for fuzzer_stats to appear + initial coverage check)
 - Do NOT modify the manifest or strategy commands (except rebuilding without ASAN when detected)
 - Do NOT use `-m none` — rebuild without ASAN instead and use `-m 4096`
+- Do NOT exit the tuning loop before bitmap_cvg >= 1% (unless all 10 attempts exhausted)
 
-Launch, verify stable stats, signal, exit.
+Launch, verify stable stats, tune seeds if needed (max 3 retries), signal, exit.

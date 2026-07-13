@@ -642,18 +642,18 @@ Total score: 5+2+6 + 5+10+4+12 + 5+9+2 + 5+9 = 74
 
 Score all command combinations from Phase 3/4 using the same walkthrough:
 
-| Rank | ID | Command | Vulnerability Score | Top Risk Operations |
-|------|----|---------|-------------------|---------------------|
-| ⭐1 | 6 | `-V -m -p -x -q -H -o` | **74** | b64_to_bin ×3, memmove, fread(stack) ×2, fopen ×3 |
-| 2 | 7 | `-V -m -P <b64>` | **68** | b64_to_bin ×3, memmove, fread(stack), fopen ×2 |
-| 3 | 4 | `-S -m -l -q -c -t` | **50** | b64_to_bin (write), fopen ×2, fread(stack) |
-| 4 | 5 | `-S -m <f1> <f2> -s -x` | **48** | b64_to_bin, fopen ×3, fread(stack) |
-| 5 | 3 | `-S -m` | **38** | b64_to_bin, fopen ×2, fread(stack) |
-| 6 | 2 | `-G -f -W -p -s` | **15** | fopen ×2, xmalloc ×2 |
-| 7 | 1 | `-G` | **10** | fopen ×2 |
-| 8 | 9 | `-C -s -W` | **8** | fopen, xmalloc |
-| 9 | 8 | `-C` | **5** | fopen |
-| 10 | 10 | `-R` | **5** | fopen |
+| Rank | ID | Command | Vulnerability Score | Est. Coverage | Top Risk Operations |
+|------|----|---------|-------------------|---------------|---------------------|
+| ⭐1 | 6 | `-V -m -p -x -q -H -o` | **74** | **40%** | b64_to_bin ×3, memmove, fread(stack) ×2, fopen ×3 |
+| 2 | 7 | `-V -m -P <b64>` | **68** | **35%** | b64_to_bin ×3, memmove, fread(stack), fopen ×2 |
+| 3 | 4 | `-S -m -l -q -c -t` | **50** | **30%** | b64_to_bin (write), fopen ×2, fread(stack) |
+| 4 | 5 | `-S -m <f1> <f2> -s -x` | **48** | **25%** | b64_to_bin, fopen ×3, fread(stack) |
+| 5 | 3 | `-S -m` | **38** | **20%** | b64_to_bin, fopen ×2, fread(stack) |
+| 6 | 2 | `-G -f -W -p -s` | **15** | **15%** | fopen ×2, xmalloc ×2 |
+| 7 | 1 | `-G` | **10** | **8%** | fopen ×2 |
+| 8 | 9 | `-C -s -W` | **8** | **5%** | fopen, xmalloc |
+| 9 | 8 | `-C` | **5** | **3%** | fopen |
+| 10 | 10 | `-R` | **5** | **3%** | fopen |
 
 ### Step 4: Save the scoring results — per tool
 
@@ -670,14 +670,14 @@ Scores are assigned based on vulnerability category (buffer overflow = 10, down 
 
 ## Tool: <tool_name_1>
 
-### 🥇 Rank 1: <full command> — Score: <N>
+### 🥇 Rank 1: <full command> — Score: <N> — Coverage: <N>%
 | Function | File | Vulnerability | Line(s) | Score | Details |
 |----------|------|--------------|---------|-------|---------|
 | <func_name> | <file.c> | <CWE category> | <line> | <N> | <description> |
 
 **Key risk**: <summary>
 
-### 🥈 Rank 2: <full command> — Score: <N>
+### 🥈 Rank 2: <full command> — Score: <N> — Coverage: <N>%
 ...
 
 ---
@@ -693,6 +693,111 @@ Scores are assigned based on vulnerability category (buffer overflow = 10, down 
 | 60+ | <N> | 🔴 High |
 | 30-59 | <N> | 🟡 Medium |
 | 0-29 | <N> | 🟢 Low |
+```
+
+### Step 5: Estimate Coverage (%)
+
+For each command combination, estimate what percentage of the project's code it covers, based on reading the call tree and source code. No rigid formula — use your judgment.
+
+- A combo that hits most modules/functions → higher %
+- A combo that only hits a few functions → lower %
+- Default: if no call tree data, default to **1%**
+
+Record as "Est. Coverage" (a percentage) in the ranking table and each rank's heading.
+
+### Step 6: Generate Sample Seed & Stdin Files for Vulnerability Paths
+
+For **all command combinations with vuln_score > 20**, create actual seed files and stdin input files on disk that exercise the specific vulnerability code paths identified in Step 2.
+
+**⚠️ 关键：你必须实际创建文件（使用 Write 工具或 bash 的 cat >），不能只在 markdown 里描述。**
+
+#### 6a. Analyze the input surfaces
+
+From the call tree, identify what inputs each combination reads:
+
+| Input Type | Source | Examples |
+|-----------|--------|----------|
+| **File input** | `-f <file>`, positional arg `@@` | Config files, source files, data files |
+| **Stdin** | Pipe/redirect `<` | Standard input when no file specified |
+| **Inline data** | `-c <str>`, `-P <b64>` | Flags that take string/value arguments |
+| **Config/filelist** | `-c <cfg>`, `-F <list>` | Secondary files that control behavior |
+
+#### 6b. Create targeted seed files (必须实际写入磁盘)
+
+For each combination, create a directory `seeds_<combo_id>/` containing the seed files. Use bash to create each file.
+
+**判断哪个文件是 AFL++ 的 `@@` fuzz 对象：**
+
+| 组合特征 | `@@` 目标 | 次要文件 |
+|---------|----------|---------|
+| `-f <file>` / 位置参数 `<file>` 输入 | 被解析的文件 → 需要 fuzz 变异 | — |
+| `-c <cfg> -f <input>` 双文件 | `<input>` 是 fuzz 入口 | `<cfg>` 是配置，固定内容不变 |
+| 无文件参数，只有 stdin (`<` / pipe) | 不需要 `@@`，stdin 就是 fuzz 入口 | — |
+| 只有 `--set key=val` 等内联参数 | 无法 fuzz（无文件输入入口） | — |
+
+**规则：**
+- 组合中有 `<file>` 输入 → 该文件就是 `@@`，创建对应的种子文件
+- 组合中只有 stdin 输入 → 创建 `stdin.dat`
+- 组合中的配置文件（如 `-c <cfg>`）、字典文件等 → 按固定内容创建，不作为 fuzz 对象
+
+```bash
+# 1) 创建目录
+mkdir -p seeds_<combo_id>/
+
+# 2) 主种子文件（作为 @@ 的 fuzz 入口）
+cat > seeds_<combo_id>/<seed_file> << 'SEED_EOF'
+<种子内容——根据工具输入格式创建有效的输入文件>
+SEED_EOF
+
+# 3) 次要文件（配置、字典等，固定内容，不作为 @@ 输入）
+cat > seeds_<combo_id>/<config_file> << 'CFG_EOF'
+<配置内容——启用目标漏洞路径的关键选项>
+CFG_EOF
+
+# 4) 只有组合确实支持标准输入时才创建 stdin.dat
+# cat > seeds_<combo_id>/stdin.dat << 'STDIN_EOF'
+# <标准输入样本>
+# STDIN_EOF
+```
+
+**你必须根据目标项目的实际语言和工具类型，创建真实的、有效的种子文件。** 以上只是示例格式。
+
+**Key principles for seed crafting:**
+- Seeds must be **valid input** that the tool accepts (not random garbage)
+- Seeds should trigger the **specific flags/params** the combination uses
+- 明确区分主种子（`@@` fuzz 对象）和次要文件（配置/字典，固定内容不变）
+- 只有组合确实通过 `<` 或 pipe 读取标准输入时才创建 `stdin.dat`
+- Keep seeds small (< 1 KB) for AFL++ performance
+- **种子必须经过 AFL++ 变异后有可能到达漏洞路径**——即种子要包含目标路径所需的基本结构（如正确文件格式、关键配置选项），让 AFL++ 的插桩和变异机制能在其基础上探索边界情况
+
+#### 6c. Document in vulnerability_path_scores.md
+
+For each combination's rank entry, add seed info as a line under **Key risk**, describing how each seed reaches its target function:
+
+```markdown
+### 🥇 Rank 1: <full command> — Score: <N> — Coverage: <N>%
+
+| Function | ... | ... |
+|----------|-----|------|
+
+**Key risk**: <summary>
+
+**Seeds** (seeds_<combo_id>/):
+- `<文件名>` — `<参数>` 经 `<函数>` → `<函数>` → `<函数>` 进入 `<目标路径>`；关键行：`<行内容>` 触发 `<漏洞路径>`
+- `<文件名>` — `<参数>` 经 `<函数>` → `<函数>` 进入 `<目标路径>`；关键行：`<行内容>` 触发 `<漏洞路径>`
+```
+
+#### 6d. Save locally for pipeline transfer
+
+种子文件保存在当前工作目录（即项目输出目录）下，pipeline 会自动将它们传输到容器。
+
+```bash
+# 确认文件已创建
+ls -la seeds_<combo_id>/
+echo "Seed files saved to $(pwd)/seeds_<combo_id>/"
+```
+
+**不要尝试在 Phase 1 复制到容器**——此时容器可能不可用。种子文件会由 pipeline 在后续阶段自动传输到 `/workspace/fuzz_<project>/seeds_prebuilt/`。
 ```
 
 ---

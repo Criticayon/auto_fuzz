@@ -16,7 +16,16 @@
     </div>
     <div class="subtitle">Vulnerability Discovery Pipeline</div>
   </div>
-  <div id="globalStatus"><span class="badge badge-yellow">Starting...</span></div>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div class="easyfuzz-toggle-wrap">
+      <label class="easyfuzz-toggle" title="EasyFuzz: 2-phase simplified fuzzing">
+        <input type="checkbox" id="easyfuzzToggle" onchange="onEasyFuzzToggle()">
+        <span class="easyfuzz-slider"></span>
+      </label>
+      <span class="easyfuzz-label">EasyFuzz</span>
+    </div>
+    <div id="globalStatus"><span class="badge badge-yellow">Starting...</span></div>
+  </div>
 </div>
 
 <div class="app-layout">
@@ -39,9 +48,14 @@
     <!-- ===== Page: Dashboard ===== -->
     <div class="page active" data-page="dashboard">
       <div class="project-bar" id="projectBar" style="display:none;">
+        <div class="proj-icon">&#127918;</div>
         <div><span class="proj-label">Testing</span><div class="proj-name" id="currentProject">—</div></div>
-        <div class="activity-bar"><div class="fill" id="activityFill"></div></div>
-        <span id="activityLabel" style="font-size:12px;color:#656d76;min-width:100px;">Idle</span>
+        <div class="activity-bar-wrap">
+          <span class="bar-char left-char">&#128640;</span>
+          <div class="activity-bar"><div class="fill" id="activityFill"></div></div>
+          <span class="bar-char right-char">&#127919;</span>
+        </div>
+        <span id="activityLabel" style="font-size:13px;color:#656d76;min-width:100px;font-weight:600;">Idle</span>
         <div class="spacer"></div>
       </div>
 
@@ -94,18 +108,21 @@
 
     <!-- ===== Page: Strategies ===== -->
     <div class="page" data-page="strategies">
-      <div id="strategyPanel" style="display:none; background:#ffffff; border:1px solid #d0d7de; border-radius:8px; padding:16px 20px; margin-bottom:16px;">
+      <div id="strategyPanel" style="display:none; position:relative; background:#faf5ed; border:1px solid #d0d7de; border-radius:8px; padding:16px 20px 56px; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
           <span class="section-title" style="margin:0;">Strategies</span>
           <span style="font-size:12px;color:#656d76;" id="strategyCount"></span>
           <span class="spacer" style="flex:1;"></span>
           <button onclick="loadManifest()" style="font-size:12px;padding:4px 10px;border:1px solid #d0d7de;border-radius:4px;background:#f6f8fa;color:#656d76;cursor:pointer;">Refresh</button>
-          <label style="font-size:13px;color:#656d76;cursor:pointer;">
+          <label id="selectAllLabel" style="font-size:13px;color:#656d76;cursor:pointer;">
             <input type="checkbox" id="selectAllStrategies" checked onchange="toggleAllStrategies()"> Select All
           </label>
         </div>
         <div id="strategyList" style="display:flex; flex-direction:column; gap:6px;"></div>
-        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #d0d7de;">
+        <div id="strategiesNoPhase2" style="display:none; text-align:center; padding:40px 20px; color:#656d76; font-size:14px;">
+          &#9888; No strategies found. Run <strong>Phase 2: Prep</strong> from the Pipeline page first.
+        </div>
+        <div id="strategiesRefSection" style="margin-top:12px; padding-top:12px; border-top:1px solid #d0d7de;">
           <div class="ref-toggle" onclick="toggleRefPanel()"><span class="arrow" id="refArrow">&#9654;</span> Reference Context <label style="font-size:13px;font-weight:400;color:#656d76;cursor:pointer;margin-left:8px;user-select:none;" onclick="event.stopPropagation()"><input type="checkbox" id="refEnabled" checked> Enable</label></div>
           <div class="ref-panel" id="refPanel" style="display:none; margin-bottom:0;">
             <textarea id="refTextInput" placeholder="&#36755;&#20837;&#21442;&#32771;&#20449;&#24687;&#20379; fuzz agent &#21442;&#32771;&#65288;&#22914;&#24050;&#30693;&#28431;&#27934;&#27169;&#24335;&#12289;&#38656;&#35201;&#37325;&#28857;&#27979;&#35797;&#30340;&#36335;&#24452;&#31561;&#65289;" spellcheck="false"></textarea>
@@ -117,6 +134,9 @@
               <span id="refFileName" style="font-size:12px;color:#656d76;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
             </div>
           </div>
+        </div>
+        <div id="strategiesStartSection" style="position:absolute; bottom:16px; right:20px;">
+          <button id="btnStartFuzz" class="btn-start-fuzz" onclick="startFuzzFromStrategies()">&#9654; Start Fuzzing</button>
         </div>
       </div>
       <div id="strategiesEmpty" style="text-align:center;color:#8b949e;padding:80px 20px;font-size:15px;">
@@ -135,6 +155,50 @@
         <div class="phase-group"><button class="sticky-note" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
         <div><button class="sticky-note" id="btnClean" onclick="cleanWorkspace()">Clean All</button></div>
         <span id="pipelineStatus" style="font-size:13px;color:#656d76;margin-left:8px;"></span>
+      </div>
+      <div id="selectedInfo" class="sel-info" style="display:none;">
+        <div class="sel-info-header">
+          <span class="sel-info-title">&#9654; Selected Strategies</span>
+          <span class="sel-info-badge" id="selectedInfoCount"></span>
+          <span class="spacer" style="flex:1;"></span>
+          <button class="sel-info-change" onclick="switchPage('strategies')">&#9998; Change</button>
+        </div>
+        <div class="sel-info-tags" id="selectedInfoList"></div>
+        <div id="selectedInfoRef" class="sel-info-ref" style="display:none;">
+          <span class="sel-info-ref-label">Reference Context</span>
+          <span class="sel-info-ref-text" id="selectedInfoRefText"></span>
+        </div>
+        <div class="sel-info-hint">&#10003; Confirmed &mdash; click <strong>Phase 3: Fuzz</strong> above to start</div>
+      </div>
+
+      <!-- EasyFuzz Command Management Panel -->
+      <div id="easyfuzzCommandPanel" style="display:none;">
+        <div class="section-title">EasyFuzz Commands</div>
+        <div style="background:#faf5ed;border:1px solid #d0d7de;border-radius:8px;padding:16px 20px;margin-bottom:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span style="font-size:13px;font-weight:600;color:#656d76;">Previously saved commands</span>
+            <span class="spacer" style="flex:1;"></span>
+            <button class="ref-btn ref-btn-default" onclick="loadEasyFuzzCommands()" style="font-size:12px;">&#x1F504; Refresh</button>
+          </div>
+          <div id="easyfuzzCmdList" style="display:flex;flex-direction:column;gap:8px;">
+            <div style="text-align:center;padding:20px;color:#656d76;font-size:13px;">No commands saved yet. Run EasyFuzz Phase 1 first.</div>
+          </div>
+          <div id="easyfuzzCmdEditor" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid #d0d7de;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Edit Command</div>
+            <select id="easyfuzzCmdSelect" style="width:100%;padding:6px 10px;font-size:13px;border:1px solid #d0d7de;border-radius:4px;margin-bottom:8px;background:#fff;" onchange="onEasyFuzzCmdSelect()">
+              <option value="">-- Select a command to edit --</option>
+            </select>
+            <textarea id="easyfuzzCmdTextarea" style="width:100%;min-height:60px;border:1px solid #d0d7de;border-radius:6px;padding:8px 10px;font-size:12px;font-family:'Cascadia Code','JetBrains Mono',monospace;resize:vertical;margin-bottom:8px;" placeholder="Modify the afl-fuzz command..."></textarea>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button class="ref-btn ref-btn-primary" onclick="saveEasyFuzzCommand()">Save Changes</button>
+              <button class="ref-btn ref-btn-default" onclick="reRunEasyFuzzCommand()">&#9654; Re-run with this command</button>
+              <span id="easyfuzzCmdSaved" style="font-size:12px;color:#1a7f37;display:none;">&#10003; Saved</span>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid #d0d7de;">
+            <button class="ref-btn ref-btn-primary" onclick="addNewEasyFuzzCommand()" style="font-size:12px;">+ Add New Command</button>
+          </div>
+        </div>
       </div>
       <div class="section-title">Pipeline Log</div>
       <div class="log-box" id="logBox" style="max-height:none;min-height:400px;">(waiting for data...)</div>
@@ -163,6 +227,12 @@
   </div>
 </div>
 
+
+<!-- Stale Strategy Notification -->
+<div id="staleNotify" style="display:none;">
+  <div class="sn-header">&#9888; Stale Strategies (2h+)</div>
+  <div id="staleList"></div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>

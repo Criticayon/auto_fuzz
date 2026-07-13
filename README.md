@@ -7,7 +7,7 @@
 ## Fuzz 流水线
 
 ```
-Phase 1: Program Analysis  → 分析 CLI 结构、参数依赖、调用链、漏洞路径评分
+Phase 1: Program Analysis  → 分析 CLI 结构、参数依赖、调用链、漏洞路径评分（生成种子文件）
       ↓
 Phase 2: Preprocess        → 编译 target（AFL++ + ASAN）、收集种子、设计策略、创建 fuzz_manifest.json
       ↓
@@ -17,6 +17,20 @@ Phase 4: Issue Generator   → 崩溃复现、ASAN 去重、生成 GitHub Issue 
       ↓
 Phase 5: Summary           → 查看本次 fuzz 活动的完整报告汇总
 ```
+
+每个阶段由 Claude Code agent 通过预定义的 skill 自主执行，中间结果持久化到 `outputs/<project>/`，支持断点续跑。
+
+### EasyFuzz 模式（简化版）
+
+右上角切换 EasyFuzz 开关后，流水线简化为 2 个阶段：
+
+```
+Phase 1: Easy-Fuzz  → Agent 自行编译 target、设计常规参数、启动 fuzz，命令记录到 easy_fuzz_commands.json
+      ↓
+Phase 2: Issues     → 崩溃复现 + ASAN 去重 + 生成 GitHub Issue 报告（复用完整版 Phase 4）
+```
+
+**命令更换功能**：Phase 1 保存所有 fuzz 命令到本地，Pipeline 页面提供编辑面板，可查看、修改、新增、重新执行命令。适合快速验证或针对性 fuzz。
 
 每个阶段由 Claude Code agent 通过预定义的 skill 自主执行，中间结果持久化到 `outputs/<project>/`，支持断点续跑。
 
@@ -92,6 +106,16 @@ python -m pipeline.webui
 图例：
 ![alt text](image-1.png)
 
+### EasyFuzz 控制
+
+| 功能 | 说明 |
+|------|------|
+| **EasyFuzz 开关** | 右上角切换，开启后隐藏 Strategies 侧边栏和 Phase 3-5 |
+| **命令记录** | Phase 1 执行后所有 fuzz 命令保存到 `easy_fuzz_commands.json` |
+| **命令编辑** | Pipeline 页面显示命令列表，可下拉选择、修改命令内容 |
+| **新增命令** | 点击 "+ Add New Command" 手动输入新的 fuzz 命令 |
+| **重新执行** | 修改命令后点击 "Re-run with this command" 重新启动 Phase 1 |
+
 ### 活动汇总
 
 - **Phase 5: Summary**：一键查看当前项目的完整 `SUMMARY.md` 报告
@@ -107,28 +131,34 @@ python -m pipeline.webui
 
 ```
 auto_fuzz/
-├── skills/                    # 技能定义文件 (.md)
-│   ├── program-analysis.md     # CLI 程序分析
-│   ├── auto-fuzz.md            # Phase 2：预处理
-│   ├── auto-fuzz-exec.md       # Phase 3：启动 fuzz
-│   ├── crash-reporter.md       # Phase 4：崩溃复现
-│   └── issue-generator.md      # Phase 4：Issue 生成
+├── skills/                    # 技能定义目录
+│   ├── program-analysis/       # CLI 程序分析
+│   ├── auto-fuzz/              # Phase 2：预处理
+│   ├── auto-fuzz-exec/         # Phase 3：启动 fuzz
+│   ├── crash-reporter/         # Phase 4：崩溃复现
+│   ├── issue-generator/        # Phase 4：Issue 生成
+│   └── easy-fuzz/              # EasyFuzz 模式
 ├── pipeline/                  # Python SDK 编排器
-│   ├── orchestrator.py        # 流水线核心逻辑 + prompt 拼接
-│   ├── webui.py               # FastAPI Web 控制中心
-│   └── __init__.py
+│   ├── orchestrator.py        # 流水线核心逻辑 + prompt 拼接（支持 --easyfuzz）
+│   ├── webui.py               # FastAPI Web 控制中心（含 easyfuzz API）
+│   ├── container.py           # Docker 容器管理
+│   ├── container_tools.py     # 容器交互工具
+│   └── ui/                    # Web UI 静态文件
+│       ├── index.html
+│       ├── app.js
+│       └── style.css
 ├── outputs/                   # 各项目的输出目录（自动生成）
 │   └── <project>/
+│       ├── easy_fuzz_commands.json      # EasyFuzz 命令记录
 │       ├── fuzz_manifest.json           # 所有策略
 │       ├── fuzz_manifest_selected.json  # 用户选中的策略
-│       ├── fuzz_manifest_select.json    # 策略 ID 选择文件
 │       ├── phase3_context.txt           # 参考上下文
 │       ├── phase3_context_enabled       # 参考上下文启用标志
 │       └── killed_strategies.json       # 已终止策略记录
 ├── docker-compose.yml         # AFL++ 容器配置
 ├── pyproject.toml
 ├── deploy.sh                  # 一键部署脚本
-└── README.md
+└── README.md                 # 本文件
 ```
 
 ## 容器交互
@@ -155,12 +185,8 @@ bash deploy.sh
 或手动安装 skills：
 
 ```bash
-mkdir -p ~/.claude/skills/{program-analysis,auto-fuzz,auto-fuzz-exec,crash-reporter,issue-generator}
-cp skills/program-analysis.md    ~/.claude/skills/program-analysis/SKILL.md
-cp skills/auto-fuzz.md           ~/.claude/skills/auto-fuzz/SKILL.md
-cp skills/auto-fuzz-exec.md      ~/.claude/skills/auto-fuzz-exec/SKILL.md
-cp skills/crash-reporter.md      ~/.claude/skills/crash-reporter/SKILL.md
-cp skills/issue-generator.md     ~/.claude/skills/issue-generator/SKILL.md
+mkdir -p ~/.claude/skills/{program-analysis,auto-fuzz,auto-fuzz-exec,crash-reporter,issue-generator,easy-fuzz}
+cp -r skills/*/ ~/.claude/skills/
 ```
 
-安装后可在 Claude Code 中用 `/program-analysis`、`/auto-fuzz`、`/crash-reporter`、`/issue-generator` 斜杠命令触发。
+安装后可在 Claude Code 中用对应斜杠命令触发。

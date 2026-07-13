@@ -312,18 +312,27 @@ async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | 
         log_artifact(str(Path(work_dir) / art))
 
 
-async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_phase: int = 4, fuzz_timeout: int = DEFAULT_FUZZ_TIMEOUT) -> None:
+async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_phase: int = 4, fuzz_timeout: int = DEFAULT_FUZZ_TIMEOUT, easyfuzz: bool = False) -> None:
     project_name = Path(target).name
     container: ContainerManager | None = None
     FUZZ_CONT = f"/workspace/fuzz_{project_name}"  # 容器内路径（在 volume mount 内，宿主机可访问）
 
     t_start = time.time()
-    for num in range(start_phase, end_phase + 1):
-        label = ["", "Program Analysis", "Preprocess", "Execute Fuzz", "Issue Generator"][num]
+    if easyfuzz:
+        phase_labels = ["", "Easy-Fuzz", "Crash Report & Issues"]
+    else:
+        phase_labels = ["", "Program Analysis", "Preprocess", "Execute Fuzz", "Issue Generator"]
+    actual_end = 2 if easyfuzz else end_phase
+    for num in range(start_phase, actual_end + 1):
+        label = phase_labels[num]
 
         # 清除下游 phase 的 artifacts，避免上一次运行的残留文件导致状态误判
-        for downstream_num in range(num + 1, 5):
-            downstream_phase = ["", "program-analysis", "auto-fuzz", "auto-fuzz-exec", "issue-generator"][downstream_num]
+        max_phase = 2 if easyfuzz else 4
+        for downstream_num in range(num + 1, max_phase + 1):
+            if easyfuzz:
+                downstream_phase = ["", "easy-fuzz", "issue-generator"][downstream_num]
+            else:
+                downstream_phase = ["", "program-analysis", "auto-fuzz", "auto-fuzz-exec", "issue-generator"][downstream_num]
             for art in ARTIFACTS.get(downstream_phase, []):
                 p = Path(work_dir) / art
                 if p.exists():
@@ -334,7 +343,60 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                         p.unlink()
                     logger.info("[cleanup] removed downstream artifact: %s (from phase %s)", art, downstream_num)
 
-        if num == 1:
+        if easyfuzz:
+            if num == 1:
+                logger.info(">>> EasyFuzz Phase 1: Connecting to AFL++ container...")
+                container = verify_container()
+                stop_existing_fuzz(container, target)
+
+                # Copy any easy_fuzz_commands.json if it exists (for command replacement)
+                commands_path = Path(work_dir) / "easy_fuzz_commands.json"
+                if commands_path.exists():
+                    container.exec(f"mkdir -p {FUZZ_CONT}")
+                    container.copy_to_container(str(commands_path), FUZZ_CONT)
+                    logger.info("[transfer] easy_fuzz_commands.json copied to container")
+
+                container_target = f"/workspace/{project_name}"
+                prompt = (
+                    f"Run the easy-fuzz skill on the project at {target}.\n"
+                    f"Project source (container): {container_target}\n"
+                    f"Fuzz workspace (container): {FUZZ_CONT}\n"
+                    f"Save all output files to {work_dir}.\n"
+                    f"IMPORTANT: Do builds (cmake, make) inside the project source dir {container_target}/.\n"
+                    f"Only fuzz output dirs (out_*), seeds, and easy_fuzz_commands.json go under {FUZZ_CONT}/.\n"
+                    f"Use container_exec for all compilation and fuzzing.\n"
+                    f"Do NOT create build scripts on the host.\n"
+                    f"CRITICAL: Do NOT delete, stop, restart, or modify the AFL++ container itself. "
+                    f"Never run 'docker rm', 'docker stop', 'docker compose down', or any docker management commands on the host. "
+                    f"All container operations must use container_exec tool only.\n"
+                    f"After fuzzing:\n"
+                    f"  1. SAVE easy_fuzz_commands.json (host workdir: current directory)\n"
+                    f"  2. Touch {FUZZ_CONT}/fuzz_started.signal\n"
+                    f"  3. Also create fuzz_started.signal in the current directory (host workdir)\n"
+                )
+                mcp = {"container": create_container_server()}
+
+            else:  # num == 2
+                logger.info(">>> EasyFuzz Phase 2: Connecting to AFL++ container...")
+                if container is None:
+                    container = verify_container()
+
+                prompt = (
+                    f"Run the crash-reporter skill, then the issue-generator skill.\n"
+                    f"Fuzz workspace (container): {FUZZ_CONT}\n"
+                    f"Project source (container): /workspace/{project_name}\n"
+                    f"Host workdir: {work_dir}\n"
+                    f"Use container_exec for crash reproduction in the container.\n"
+                    f"Use Write/Read for all operations on the host.\n"
+                    f"Save SUMMARY.md to {work_dir}/reports/ on the host.\n"
+                    f"Save each unique crash's PoC and reproduce.sh to {work_dir}/crashes/<crash_type>/ on the host.\n"
+                    f"Save issue files to {work_dir}/issues/ on the host.\n"
+                    f"IMPORTANT: SUMMARY.md must be written in Chinese (中文). "
+                    f"Individual issue files must be in English."
+                )
+                mcp = {"container": create_container_server()}
+
+        elif num == 1:
             prompt = (
                 f"Run the program-analysis skill on the project at {target}.\n"
                 f"Save all output files to {work_dir}."
@@ -346,7 +408,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
             container = verify_container()
             stop_existing_fuzz(container, target)
 
-            # 把 Phase 1 的 4 个分析文件复制到容器内
+            # 把 Phase 1 的 4 个分析文件 + 种子文件复制到容器内
             logger.info("[transfer] copying analysis files to container: %s", FUZZ_CONT)
             container.exec(f"mkdir -p {FUZZ_CONT}")
             for f in ["command_combinations.json", "call_tree.md",
@@ -357,6 +419,20 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                     logger.info("  => %s", f)
                 else:
                     logger.warning("  => %s (NOT FOUND)", f)
+            # 传输 Phase 1 生成的种子文件
+            logger.info("[transfer] copying seed files to container...")
+            container.exec(f"mkdir -p {FUZZ_CONT}/seeds_prebuilt")
+            seeds_dirs = list(Path(work_dir).glob("seeds_*"))
+            if seeds_dirs:
+                import shutil
+                for sd in seeds_dirs:
+                    container.exec(f"mkdir -p {FUZZ_CONT}/seeds_prebuilt/{sd.name}")
+                    container.copy_to_container(str(sd), f"{FUZZ_CONT}/seeds_prebuilt/")
+                    count = len(list(sd.iterdir()))
+                    shutil.rmtree(str(sd))
+                    logger.info("  => seeds_prebuilt/%s (%d files, local deleted)", sd.name, count)
+            else:
+                logger.info("[transfer] no seed directories found")
 
             container_target = f"/workspace/{project_name}"
             prompt = (
@@ -467,14 +543,14 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
         logger.info(">>> Starting Phase %s: %s", num, label)
         await run_phase(num, prompt, work_dir, mcp_servers=mcp)
 
-        # Phase 1 结束后：确保项目源码在容器内
-        if num == 1:
+        # Phase 1 结束后：确保项目源码在容器内（仅非 easyfuzz 模式）
+        if num == 1 and not easyfuzz:
             logger.info("[transfer] ensuring project source in container...")
             try:
                 c = verify_container()
                 container_target = f"/workspace/{project_name}"
                 # 检查源码是否已存在
-                exists = c.exec(f"test -d {container_target} && ls {container_target}/CMakeLists.txt 2>/dev/null || true")
+                exists = c.exec(f"test -d {container_target} && (ls {container_target}/CMakeLists.txt {container_target}/configure {container_target}/configure.ac {container_target}/Makefile.am {container_target}/meson.build 2>/dev/null) || true")
                 if exists.strip():
                     logger.info("[transfer] project source already in container: %s", container_target)
                 else:
@@ -485,8 +561,8 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
             except Exception as e:
                 logger.warning("[transfer] failed to ensure project source in container: %s", e)
 
-        # Phase 3 结束后：把 signal 和 crash 结果从容器复制回宿主机
-        if num == 3:
+        # 非 easyfuzz Phase 3 或 easyfuzz Phase 1 结束后：把 signal 从容器复制回宿主机
+        if (not easyfuzz and num == 3) or (easyfuzz and num == 1):
             logger.info("[transfer] retrieving fuzz results from container...")
             try:
                 c = verify_container()
@@ -506,8 +582,12 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
     logger.info("")
     logger.info("Artifacts:")
     logger.info("  %s/", work_dir)
-    for art_name in ["command_combinations.json", "call_tree.md", "coverage_summary.md",
-                      "vulnerability_path_scores.md", "fuzz_manifest.json", "issues/SUMMARY.md"]:
+    if easyfuzz:
+        artifacts_to_check = ["easy_fuzz_commands.json", "reports/SUMMARY.md", "issues/SUMMARY.md"]
+    else:
+        artifacts_to_check = ["command_combinations.json", "call_tree.md", "coverage_summary.md",
+                          "vulnerability_path_scores.md", "fuzz_manifest.json", "issues/SUMMARY.md"]
+    for art_name in artifacts_to_check:
         log_artifact(str(Path(work_dir) / art_name))
 
 
@@ -521,8 +601,9 @@ def main():
     )
     parser.add_argument("target", nargs="?", help="目标项目路径")
     parser.add_argument("--resume", action="store_true", help="从断点继续（自动检测已完成阶段）")
-    parser.add_argument("--phase", type=int, choices=[1, 2, 3, 4], default=None, help="只运行指定阶段")
+    parser.add_argument("--phase", type=int, choices=[1, 2, 3, 4], default=None, help="只运行指定阶段（easyfuzz 模式下仅支持 1, 2）")
     parser.add_argument("--stop-fuzz", action="store_true", help="停止容器中所有 afl-fuzz 进程")
+    parser.add_argument("--easyfuzz", action="store_true", help="EasyFuzz 2-phase 模式（Phase 1: 简单fuzz, Phase 2: crash报告）")
     parser.add_argument("--fuzz-timeout", type=int, default=DEFAULT_FUZZ_TIMEOUT,
                         help=f"Fuzz 超时秒数（默认 {DEFAULT_FUZZ_TIMEOUT}s = 24h，仅用于上下文）")
 
@@ -578,6 +659,12 @@ def main():
         logger.info("Resuming from Phase %s...", start)
     else:
         start = 1
+
+    if args.easyfuzz:
+        logger.info("EasyFuzz mode enabled — running 2-phase pipeline")
+        anyio.run(run_pipeline, args.target, str(work_dir), 1, 2, args.fuzz_timeout, easyfuzz=True)
+        logger.info("EasyFuzz pipeline finished")
+        return
 
     if args.phase is not None:
         anyio.run(run_pipeline, args.target, str(work_dir), args.phase, args.phase, args.fuzz_timeout)

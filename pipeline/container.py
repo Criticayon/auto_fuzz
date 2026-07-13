@@ -323,15 +323,38 @@ def cli_shell(cmd: str | None = None):
 
 
 def cli_compile(target_dir: str):
-    """在容器内编译目标项目。"""
+    """在容器内编译目标项目（自动检测构建系统）。"""
     mgr = ContainerManager()
     try:
         mgr.ensure_running()
         print(f"Compiling {target_dir} in container {mgr.container_name}...")
-        out = mgr.exec(
-            f"cd /workspace/{target_dir} && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ ./configure --disable-shared && make -j$(nproc)",
-            timeout=1200,
-        )
+        # 自动检测构建系统
+        has_cmake = mgr.exec(f"test -f /workspace/{target_dir}/CMakeLists.txt && echo 1 || echo 0").strip() == "1"
+        has_configure = mgr.exec(f"test -f /workspace/{target_dir}/configure && echo 1 || echo 0").strip() == "1"
+        has_configure_ac = mgr.exec(f"test -f /workspace/{target_dir}/configure.ac && echo 1 || echo 0").strip() == "1"
+        has_meson = mgr.exec(f"test -f /workspace/{target_dir}/meson.build && echo 1 || echo 0").strip() == "1"
+        has_makefile = mgr.exec(f"test -f /workspace/{target_dir}/Makefile && echo 1 || echo 0").strip() == "1"
+
+        if has_cmake:
+            print("  Build system: CMake")
+            cmd = f"cd /workspace/{target_dir} && mkdir -p build_afl && cd build_afl && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ cmake .. -DCMAKE_BUILD_TYPE=Debug -DBUILD_SHARED_LIBS=OFF && make -j$(nproc)"
+        elif has_configure:
+            print("  Build system: Autotools (configure)")
+            cmd = f"cd /workspace/{target_dir} && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ ./configure --disable-shared --enable-static --disable-werror && make -j$(nproc)"
+        elif has_configure_ac:
+            print("  Build system: Autotools (configure.ac, running autoreconf)")
+            cmd = f"cd /workspace/{target_dir} && autoreconf -fi && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ ./configure --disable-shared --enable-static --disable-werror && make -j$(nproc)"
+        elif has_meson:
+            print("  Build system: Meson")
+            cmd = f"cd /workspace/{target_dir} && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ meson setup build_afl -Ddefault_library=static --buildtype=debug && ninja -C build_afl"
+        elif has_makefile:
+            print("  Build system: Plain Makefile")
+            cmd = f"cd /workspace/{target_dir} && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ AFL_HARDEN=1 make -j$(nproc)"
+        else:
+            print("  No known build system detected, trying plain make")
+            cmd = f"cd /workspace/{target_dir} && AFL_USE_ASAN=1 CC=afl-clang-fast CXX=afl-clang-fast++ AFL_HARDEN=1 make -j$(nproc)"
+
+        out = mgr.exec(cmd, timeout=1200)
         print(out)
     except ContainerError as e:
         print(f"[ERROR] {e}")

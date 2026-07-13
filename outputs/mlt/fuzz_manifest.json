@@ -1,0 +1,87 @@
+{
+  "project": "MLT (Meltytech Multimedia Framework)",
+  "version": "7.41.0",
+  "target_binary": "/workspace/mlt/build_afl/out/bin/melt",
+  "cmplog_binary": "/workspace/mlt/build_cmplog/out/bin/melt",
+  "dictionary": "/workspace/fuzz_mlt/melt.dict",
+  "env": {
+    "MLT_REPOSITORY": "/workspace/mlt/build_afl/out/lib/mlt",
+    "MLT_DATA": "/workspace/mlt/build_afl/out/share/mlt",
+    "AFL_IGNORE_PROBLEMS": "1"
+  },
+  "afl_params": {
+    "mem_limit": 4096,
+    "timeout": 10000,
+    "no_fork_server": true,
+    "terminal": "xterm-256color"
+  },
+  "batch_size": 4,
+  "strategies": [
+    {
+      "id": "melt_full_pipeline",
+      "name": "melt_full_pipeline",
+      "analysis_tool": "melt",
+      "analysis_id": 14,
+      "vuln_score": 116,
+      "priority": "critical",
+      "seeds_dir": "seeds_media",
+      "desc": "从 analysis Rank 1 (score 116) 映射: Full pipeline with custom profile, multiple filters, multi-track, transitions, mix, and avformat encoding",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color MLT_REPOSITORY=/workspace/mlt/build_afl/out/lib/mlt MLT_DATA=/workspace/mlt/build_afl/out/share/mlt AFL_IGNORE_PROBLEMS=1 afl-fuzz -i /workspace/fuzz_mlt/seeds_media -o /workspace/fuzz_mlt/out_full_pipeline -m 4096 -t 10000 -x /workspace/fuzz_mlt/melt.dict -c /workspace/mlt/build_cmplog/out/bin/melt -- /workspace/mlt/build_afl/out/bin/melt -profile hdv_720p @@ -filter brightness gamma=1.2 -filter crop left=50 -track /workspace/fuzz_mlt/seeds_media/ref_seed.bin -transition composite geometry=10%:10%:30%x30% -mix 25 -mixer luma -consumer avformat /dev/null vcodec=libx264 acodec=aac preset=medium crf=18 progress2=true"
+    },
+    {
+      "id": "melt_melt_file",
+      "name": "melt_melt_file",
+      "analysis_tool": "melt",
+      "analysis_id": 20,
+      "vuln_score": 98,
+      "priority": "critical",
+      "seeds_dir": "seeds_melt",
+      "desc": "从 analysis Rank 2 (score 98) 映射: Melt file execution — processes .melt project files via producer_melt_file_init",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color MLT_REPOSITORY=/workspace/mlt/build_afl/out/lib/mlt MLT_DATA=/workspace/mlt/build_afl/out/share/mlt AFL_IGNORE_PROBLEMS=1 afl-fuzz -i /workspace/fuzz_mlt/seeds_melt -o /workspace/fuzz_mlt/out_melt_file -m 4096 -t 10000 -x /workspace/fuzz_mlt/melt.dict -c /workspace/mlt/build_cmplog/out/bin/melt -- /workspace/mlt/build_afl/out/bin/melt @@"
+    },
+    {
+      "id": "melt_multi_track_filter",
+      "name": "melt_multi_track_filter",
+      "analysis_tool": "melt",
+      "analysis_id": 9,
+      "vuln_score": 72,
+      "priority": "high",
+      "seeds_dir": "seeds_media",
+      "desc": "从 analysis Rank 3 (score 72) 映射: Apply brightness and crop filters, transcode with progress display",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color MLT_REPOSITORY=/workspace/mlt/build_afl/out/lib/mlt MLT_DATA=/workspace/mlt/build_afl/out/share/mlt AFL_IGNORE_PROBLEMS=1 afl-fuzz -i /workspace/fuzz_mlt/seeds_media -o /workspace/fuzz_mlt/out_multi_track_filter -m 4096 -t 10000 -x /workspace/fuzz_mlt/melt.dict -c /workspace/mlt/build_cmplog/out/bin/melt -- /workspace/mlt/build_afl/out/bin/melt @@ -filter brightness gamma=1.2 -filter crop left=10 -consumer avformat /dev/null -progress"
+    },
+    {
+      "id": "melt_simple_transcode",
+      "name": "melt_simple_transcode",
+      "analysis_tool": "melt",
+      "analysis_id": 8,
+      "vuln_score": 52,
+      "priority": "medium",
+      "seeds_dir": "seeds_media",
+      "desc": "从 analysis Rank 4 (score 52) 映射: Simple transcode with avformat consumer, codec parameters",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color MLT_REPOSITORY=/workspace/mlt/build_afl/out/lib/mlt MLT_DATA=/workspace/mlt/build_afl/out/share/mlt AFL_IGNORE_PROBLEMS=1 afl-fuzz -i /workspace/fuzz_mlt/seeds_media -o /workspace/fuzz_mlt/out_simple_transcode -m 4096 -t 10000 -x /workspace/fuzz_mlt/melt.dict -c /workspace/mlt/build_cmplog/out/bin/melt -- /workspace/mlt/build_afl/out/bin/melt @@ -consumer avformat /dev/null vcodec=libx264 acodec=aac"
+    },
+    {
+      "id": "melt_multi_consumer",
+      "name": "melt_multi_consumer",
+      "analysis_tool": "melt",
+      "analysis_id": 18,
+      "vuln_score": 48,
+      "priority": "medium",
+      "seeds_dir": "seeds_media",
+      "desc": "从 analysis Rank 5 (score 48) 映射: Multi-consumer parsing with null + avformat consumers",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color MLT_REPOSITORY=/workspace/mlt/build_afl/out/lib/mlt MLT_DATA=/workspace/mlt/build_afl/out/share/mlt AFL_IGNORE_PROBLEMS=1 afl-fuzz -i /workspace/fuzz_mlt/seeds_media -o /workspace/fuzz_mlt/out_multi_consumer -m 4096 -t 10000 -x /workspace/fuzz_mlt/melt.dict -c /workspace/mlt/build_cmplog/out/bin/melt -- /workspace/mlt/build_afl/out/bin/melt @@ -consumer null -consumer avformat /dev/null"
+    },
+    {
+      "id": "melt_serialise",
+      "name": "melt_serialise",
+      "analysis_tool": "melt",
+      "analysis_id": 11,
+      "vuln_score": 25,
+      "priority": "low",
+      "seeds_dir": "seeds_media",
+      "desc": "从 analysis summary Serialise (score ~25) 映射: Write processing pipeline to serialised file instead of executing",
+      "command": "AFL_NO_FORKSRV=1 TERM=xterm-256color MLT_REPOSITORY=/workspace/mlt/build_afl/out/lib/mlt MLT_DATA=/workspace/mlt/build_afl/out/share/mlt AFL_IGNORE_PROBLEMS=1 afl-fuzz -i /workspace/fuzz_mlt/seeds_media -o /workspace/fuzz_mlt/out_serialise -m 4096 -t 10000 -x /workspace/fuzz_mlt/melt.dict -c /workspace/mlt/build_cmplog/out/bin/melt -- /workspace/mlt/build_afl/out/bin/melt @@ -filter gamma=1.2 -consumer avformat /dev/null -serialise /dev/null"
+    }
+  ]
+}
