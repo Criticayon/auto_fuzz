@@ -491,9 +491,9 @@ async function cleanWorkspace() {
   status.style.color = '#9a6700';
   const r = await api(`/api/workspace/clean?target=${encodeURIComponent(target)}`, {method:'POST'});
   if (r && r.status === 'cleaned') {
-    document.getElementById('strategyPanel').style.display = 'none';
     status.textContent = `Workspace cleaned for ${target}`;
     status.style.color = '#1a7f37';
+    updateDashboard();
   } else {
     status.textContent = r && r.error ? r.error : 'Failed to clean';
     status.style.color = '#cf222e';
@@ -775,6 +775,11 @@ updateSelectedInfo = function() {
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('targetSelect').addEventListener('change', () => {
+    document.querySelectorAll('.strategy-cb').forEach(cb => cb.checked = false);
+    const selAll = document.getElementById('selectAll');
+    if (selAll) selAll.checked = false;
+    window._selectedNames = [];
+    window._selectedRef = '';
     loadManifest();
     updateDashboard();
     loadRefContext();

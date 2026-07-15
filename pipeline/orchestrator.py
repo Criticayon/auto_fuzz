@@ -315,7 +315,8 @@ async def run_phase(phase: int, prompt: str, work_dir: str, mcp_servers: dict | 
 async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_phase: int = 4, fuzz_timeout: int = DEFAULT_FUZZ_TIMEOUT, easyfuzz: bool = False) -> None:
     project_name = Path(target).name
     container: ContainerManager | None = None
-    FUZZ_CONT = f"/workspace/fuzz_{project_name}"  # 容器内路径（在 volume mount 内，宿主机可访问）
+    FUZZ_CONT = f"/workspace/fuzz_{project_name}"  # 正常模式容器路径
+    EASY_CONT = f"/workspace/easy_fuzz_{project_name}"  # EasyFuzz 容器路径（与正常模式隔离）
 
     t_start = time.time()
     if easyfuzz:
@@ -352,18 +353,18 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 # Copy any easy_fuzz_commands.json if it exists (for command replacement)
                 commands_path = Path(work_dir) / "easy_fuzz_commands.json"
                 if commands_path.exists():
-                    container.exec(f"mkdir -p {FUZZ_CONT}")
-                    container.copy_to_container(str(commands_path), FUZZ_CONT)
+                    container.exec(f"mkdir -p {EASY_CONT}")
+                    container.copy_to_container(str(commands_path), EASY_CONT)
                     logger.info("[transfer] easy_fuzz_commands.json copied to container")
 
                 container_target = f"/workspace/{project_name}"
                 prompt = (
                     f"Run the easy-fuzz skill on the project at {target}.\n"
                     f"Project source (container): {container_target}\n"
-                    f"Fuzz workspace (container): {FUZZ_CONT}\n"
+                    f"Fuzz workspace (container): {EASY_CONT}\n"
                     f"Save all output files to {work_dir}.\n"
                     f"IMPORTANT: Do builds (cmake, make) inside the project source dir {container_target}/.\n"
-                    f"Only fuzz output dirs (out_*), seeds, and easy_fuzz_commands.json go under {FUZZ_CONT}/.\n"
+                    f"Only fuzz output dirs (out_*), seeds, and easy_fuzz_commands.json go under {EASY_CONT}/.\n"
                     f"Use container_exec for all compilation and fuzzing.\n"
                     f"Do NOT create build scripts on the host.\n"
                     f"CRITICAL: Do NOT delete, stop, restart, or modify the AFL++ container itself. "
@@ -371,7 +372,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                     f"All container operations must use container_exec tool only.\n"
                     f"After fuzzing:\n"
                     f"  1. SAVE easy_fuzz_commands.json (host workdir: current directory)\n"
-                    f"  2. Touch {FUZZ_CONT}/fuzz_started.signal\n"
+                    f"  2. Touch {EASY_CONT}/fuzz_started.signal\n"
                     f"  3. Also create fuzz_started.signal in the current directory (host workdir)\n"
                 )
                 mcp = {"container": create_container_server()}
@@ -383,7 +384,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
 
                 prompt = (
                     f"Run the crash-reporter skill, then the issue-generator skill.\n"
-                    f"Fuzz workspace (container): {FUZZ_CONT}\n"
+                    f"Fuzz workspace (container): {EASY_CONT}\n"
                     f"Project source (container): /workspace/{project_name}\n"
                     f"Host workdir: {work_dir}\n"
                     f"Use container_exec for crash reproduction in the container.\n"
@@ -567,7 +568,8 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
             try:
                 c = verify_container()
                 try:
-                    c.copy_from_container(f"{FUZZ_CONT}/fuzz_started.signal", str(work_dir))
+                    signal_cont = EASY_CONT if easyfuzz else FUZZ_CONT
+                    c.copy_from_container(f"{signal_cont}/fuzz_started.signal", str(work_dir))
                     logger.info("[transfer] fuzz_started.signal retrieved")
                 except Exception:
                     logger.warning("[transfer] fuzz_started.signal not found in container")
@@ -661,8 +663,11 @@ def main():
         start = 1
 
     if args.easyfuzz:
-        logger.info("EasyFuzz mode enabled — running 2-phase pipeline")
-        anyio.run(run_pipeline, args.target, str(work_dir), 1, 2, args.fuzz_timeout, easyfuzz=True)
+        logger.info("EasyFuzz mode enabled")
+        if args.phase is not None:
+            anyio.run(run_pipeline, args.target, str(work_dir), args.phase, args.phase, args.fuzz_timeout, easyfuzz=True)
+        else:
+            anyio.run(run_pipeline, args.target, str(work_dir), 1, 2, args.fuzz_timeout, easyfuzz=True)
         logger.info("EasyFuzz pipeline finished")
         return
 

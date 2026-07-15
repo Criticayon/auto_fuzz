@@ -4,7 +4,7 @@ description: "Generate developer-facing GitHub Issue reports from AFL++ fuzzing 
 license: Apache-2.0
 compatibility: "Linux (primary), macOS, Windows (WSL). Requires fuzzing campaign results: reports/SUMMARY.md + crashes/<type>/ folders."
 metadata:
-  version: "3.1"
+  version: "3.2"
   depends_on: ["crash-reporter"]
 ---
 
@@ -187,9 +187,20 @@ mkdir -p issues
 
 Group the crash types by the tool or component that produced them (e.g., gml2gv, gvpr, dot). This makes the report more structured.
 
-### Step 3: Generate individual issue for each crash type
+### Step 3: Generate individual issue for each crash type (增量)
 
-For each crash type folder, generate a GitHub Issue markdown file in **English** (for submission to upstream developers). Include the crash instance count:
+**不重复生成已有的 issue 文件。** 对每个 crash type 文件夹，先检查 `issues/issue_<crash_type>.md` 是否已存在：
+
+```bash
+crash_type=$(basename "$crash_type_dir")
+issue_file="issues/issue_${crash_type}.md"
+if [ -f "$issue_file" ]; then
+  echo "[skip] $issue_file already exists — incremental mode, not regenerating"
+  continue
+fi
+```
+
+Only when the issue file does NOT exist yet, generate a new GitHub Issue markdown file in **English** (for submission to upstream developers). Include the crash instance count:
 
 ```bash
 source target_metadata.sh 2>/dev/null
@@ -201,8 +212,12 @@ fi
 if [ -z "${COMMIT_HASH:-}" ]; then
   COMMIT_HASH=$(grep "Commit" reports/SUMMARY.md 2>/dev/null | sed 's/.*`//;s/`.*//')
 fi
-if [ -z "${PROJECT_VERSION:-}" ]; then
-  PROJECT_VERSION=$(grep "Version" reports/SUMMARY.md 2>/dev/null | sed 's/.*|//' | head -1 | xargs)
+# PROG_VERSION is the actual binary --version output; fall back to git describe
+if [ -z "${PROG_VERSION:-}" ]; then
+  PROG_VERSION="${PROJECT_VERSION:-}"
+fi
+if [ -z "${PROG_VERSION:-}" ]; then
+  PROG_VERSION=$(grep "Version" reports/SUMMARY.md 2>/dev/null | sed 's/.*|//' | head -1 | xargs)
 fi
 if [ -z "${REPORT_DATE:-}" ]; then
   REPORT_DATE=$(grep "date\|Date" reports/SUMMARY.md 2>/dev/null | sed 's/.*|//' | head -1 | xargs)
@@ -302,9 +317,31 @@ ASAN frame info:
 
 Save as `issues/issue_<crash_type>.md`.
 
-### Step 4: Generate summary report (issues/SUMMARY.md)
+### Step 4: Generate/Update summary report — issues/SUMMARY.md (增量)
+
+**不删除已有的 issues/SUMMARY.md。** 如果已存在，只追加新漏洞条目；不存在则全新创建。
+
+```bash
+if [ -f "issues/SUMMARY.md" ]; then
+  echo "Existing issues/SUMMARY.md found — will append incrementally"
+  # 读取已有 SUMMARY.md 中记录的漏洞，避免重复
+  ALREADY_RECORDED=$(grep "^### 漏洞" issues/SUMMARY.md | wc -l)
+  echo "Already recorded $ALREADY_RECORDED vulnerabilities"
+else
+  echo "No existing issues/SUMMARY.md — creating new"
+  mkdir -p issues
+fi
+```
 
 Generate a comprehensive Chinese-language summary report. Include crash instance counts for every vulnerability. **不要在漏洞列表中出现"变体B"、"变体C"这类标签——crash-reporter 已按触发函数去重，每个漏洞只有一个条目，实例数体现在 crash_count 中。**
+
+If `issues/SUMMARY.md` already exists:
+  - Keep all existing content (header, basic info, existing vulnerability entries)
+  - Only **append** entries for crash types that are NOT yet documented in the existing SUMMARY.md
+  - Update the top-level total counts (总崩溃数、独立漏洞数) to reflect old + new
+  - Update the 汇总 tables to include new entries
+
+If `issues/SUMMARY.md` does NOT exist:
 
 ```markdown
 # Fuzzing Campaign Summary — <Project Name>

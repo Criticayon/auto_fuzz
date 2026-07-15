@@ -223,6 +223,31 @@ METADATA
 echo "Target: ${PROJECT_VERSION} (${COMMIT_HASH}), date: ${REPORT_DATE}"
 ```
 
+### Detect program version string
+
+After saving basic metadata, try to extract the program's own version string by running the built binary with `--version`. This gives the actual release version (e.g. "Uncrustify-0.79.0") rather than just the git tag:
+
+```bash
+# Try common version flags on the built binary
+# The binary path depends on what was built. Look in common locations:
+for BIN in "$PROJ"/build_afl/bin/* "$PROJ"/build_afl/* "$PROJ"/build/bin/* "$PROJ"/build/* "$PROJ"/src/* "$PROJ"/*; do
+  if [ -f "$BIN" ] && [ -x "$BIN" ] && file "$BIN" | grep -q ELF; then
+    PROG_VERSION=$(timeout 5 "$BIN" --version 2>/dev/null || timeout 5 "$BIN" -V 2>/dev/null || timeout 5 "$BIN" -version 2>/dev/null || echo "")
+    if [ -n "$PROG_VERSION" ]; then
+      echo "Program version: $PROG_VERSION"
+      break
+    fi
+  fi
+done
+
+# Append to target_metadata.sh
+cat >> target_metadata.sh <<- PROGVER
+PROG_VERSION="${PROG_VERSION}"
+PROGVER
+
+echo "PROG_VERSION=${PROG_VERSION}"
+```
+
 然后**将实际使用的 ASAN 编译命令记录到 target_metadata.sh**，供后续 crash-reporter / issue-generator 使用：
 
 ```bash

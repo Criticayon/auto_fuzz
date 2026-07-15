@@ -277,14 +277,12 @@ async def api_easyfuzz_save_commands(target: str = "", request: Request = None):
     return {"status": "saved", "target": target}
 
 
-@app.post("/api/pipeline/start")
-
-
 def clean_workspace(target: str) -> dict:
     """清空指定项目的工作目录（容器 + 本机）。"""
     project_name = Path(target).name
     host_dir = BASE_DIR / "outputs" / project_name
     cont_fuzz = f"/workspace/fuzz_{project_name}"
+    cont_easy_fuzz = f"/workspace/easy_fuzz_{project_name}"
     cont_src = f"/workspace/{project_name}"
 
     # 1) 先干掉该项目所有的 afl-fuzz 进程
@@ -294,9 +292,11 @@ def clean_workspace(target: str) -> dict:
         f"| awk '{{print $2}}' | xargs -r kill -9 2>/dev/null || true"
     )
 
-    # 2) 清空容器内 fuzz workspace
+    # 2) 清空容器内 fuzz workspace（正常模式 + EasyFuzz 模式）
     logger.info("[clean] removing container fuzz workspace: %s", cont_fuzz)
     docker_exec(f"rm -rf {cont_fuzz} 2>/dev/null || true")
+    logger.info("[clean] removing container easy fuzz workspace: %s", cont_easy_fuzz)
+    docker_exec(f"rm -rf {cont_easy_fuzz} 2>/dev/null || true")
 
     # 3) 清空容器内项目源码（Phase 1 复制过去的）
     logger.info("[clean] removing container project source: %s", cont_src)
@@ -501,19 +501,25 @@ async def api_ref_context_get(target: str):
 @app.post("/api/pipeline/start")
 async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86400):
     """启动 pipeline（在后台子进程运行）。"""
+    import sys
     global _pipeline_proc, _current_target
     if _pipeline_proc and _pipeline_proc.poll() is None:
         return {"error": "pipeline already running"}
     target_path = str(BASE_DIR.parent / target)
-    cmd = ["python", "-m", "pipeline.orchestrator", target_path, "--phase", str(phase)]
+    cmd = [sys.executable or "python", "-m", "pipeline.orchestrator", target_path, "--phase", str(phase)]
     if _easyfuzz_enabled:
         cmd.append("--easyfuzz")
     if phase == 2:
         cmd.extend(["--fuzz-timeout", str(fuzz_timeout)])
-    _pipeline_proc = subprocess.Popen(
-        cmd,
-        cwd=str(BASE_DIR),
-    )
+    logger.info("[pipeline] starting: %s (cwd=%s)", " ".join(cmd), BASE_DIR)
+    try:
+        _pipeline_proc = subprocess.Popen(
+            cmd,
+            cwd=str(BASE_DIR),
+        )
+    except Exception as e:
+        logger.error("[pipeline] failed to start: %s", e)
+        return {"error": f"subprocess error: {e}"}
     _current_target = target
     return {"status": "started", "target": target, "phase": phase}
 

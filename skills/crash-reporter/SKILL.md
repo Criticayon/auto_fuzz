@@ -4,7 +4,7 @@ description: "Crash triage and ASAN report generation from AFL++ fuzzing output.
 license: Apache-2.0
 compatibility: "Linux (primary), macOS, Windows (WSL). Requires AFL++ installed and in PATH."
 metadata:
-  version: "2.1"
+  version: "2.2"
 ---
 
 # Crash Reporter: Triage & ASAN Report Generation
@@ -21,7 +21,7 @@ Crash reproduction requires an ASAN-instrumented binary. First check if one alre
 
 ```bash
 source target_metadata.sh
-echo "PROJ=$PROJ BUILD_DIR=$BUILD_DIR COMMIT_HASH=$COMMIT_HASH"
+echo "PROJ=$PROJ BUILD_DIR=$BUILD_DIR COMMIT_HASH=$COMMIT_HASH PROG_VERSION=$PROG_VERSION"
 ```
 
 ### Step 2: Sync to latest commit
@@ -248,9 +248,50 @@ If the crash was produced by a strategy with specific CLI flags, include those f
 
 ---
 
-## Phase 4: Generate SUMMARY.md
+## Phase 4: Generate/Update SUMMARY.md (增量)
 
-Save a summary to `reports/SUMMARY.md` on the host. Include target info, campaign date, total crashes, unique vulnerabilities, and a table with crash instance counts.
+**不删除已有的 SUMMARY.md。** 如果 `reports/SUMMARY.md` 已存在，读取它，合并新漏洞，更新计数；不存在则全新创建。
+
+### Step 1: 检查是否已有 SUMMARY.md
+
+```bash
+if [ -f "reports/SUMMARY.md" ]; then
+  echo "Existing SUMMARY.md found — will merge incrementally"
+  EXISTING_SUMMARY=true
+else
+  echo "No existing SUMMARY.md — creating new"
+  EXISTING_SUMMARY=false
+  mkdir -p reports
+fi
+```
+
+### Step 2: 汇总所有漏洞类型
+
+运行 Phase 3 后，`crashes/` 下已有各漏洞类型的目录。对每个 `crashes/<type>/`，读取 PoC、crash_count.txt、reproduce.sh，**结合源码分析根因**：从 ASAN 堆栈找到对应的源文件，用 Read 工具查看关键函数附近的代码逻辑，说明为什么这个输入会触发漏洞（如：缺少边界检查、空指针未验证、释放后未置空等）。
+
+### Step 3: 增量合并
+
+```bash
+if [ "$EXISTING_SUMMARY" = true ]; then
+  # 从已有 SUMMARY.md 中提取已记录的漏洞类型列表
+  ALREADY_RECORDED=$(grep "^### " reports/SUMMARY.md | sed 's/.*：//' | tr -d ' ')
+  # 对比 crashes/ 中实际存在的类型
+  for crash_dir in crashes/*/; do
+    slug=$(basename "$crash_dir")
+    if echo "$ALREADY_RECORDED" | grep -q "$slug"; then
+      echo "[skip] $slug already in SUMMARY.md"
+    else
+      echo "[new] $slug — will append"
+    fi
+  done
+fi
+```
+
+### Step 4: 生成/更新 SUMMARY.md
+
+- 如果 `$EXISTING_SUMMARY=false`：生成全新的 SUMMARY.md，包含所有漏洞条目
+- 如果 `$EXISTING_SUMMARY=true`：只**追加**新漏洞条目到已有的 SUMMARY.md 末尾，不删除、不修改已有内容
+- 无论哪种情况，**更新顶部的总崩溃数和独立漏洞数**（旧数 + 新数）
 
 对每个确认的漏洞，**结合源码分析根因**：从 ASAN 堆栈找到对应的源文件，用 Read 工具查看关键函数附近的代码逻辑，说明为什么这个输入会触发漏洞（如：缺少边界检查、空指针未验证、释放后未置空等），并将根因分析写入 SUMMARY.md 对应的漏洞条目中。
 
