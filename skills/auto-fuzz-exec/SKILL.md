@@ -261,9 +261,9 @@ For each strategy listed in `/tmp/underperforming_strategies.txt`, enter the **s
 
 Each attempt must:
 1. **Study the strategy command** from the manifest — what flags/params does it use?
-2. **Read `vulnerability_path_scores.md`** to identify the specific functions targeted by this strategy's parameter combination
+2. **Read `vulnerability_path_scores.md`** to identify the specific functions targeted by this strategy's parameter combination (primary reference)
 3. **Find the matching `call_tree.md` code paths** — understand what input format can reach those functions
-4. **Craft targeted seed files and stdin inputs** — for parser tools: valid format files; for config-driven tools: config files that trigger specific options; for filelist inputs: properly structured list files. Both seed files AND stdin input files can be created/modified.
+4. **Craft targeted seed files and stdin inputs** based on the analysis above. **Supplement** with the project's own test/example/sample files (`$PROJ/test*`, `$PROJ/example*`, etc.) as seed candidates when available — but do not rely solely on them.
 5. **Verify bitmap_cvg after restart** — if still < 1%, retry with deeper analysis
 
 ```bash

@@ -498,6 +498,10 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 f"  1. Touch {FUZZ_CONT}/fuzz_started.signal (in container)\n"
                 f"  2. Also create fuzz_started.signal in the current directory (host workdir)\n"
                 f"  3. Output [FUZZ_STARTED]"
+                f"IMPORTANT: When tuning seeds for low-coverage strategies, prioritize "
+                f"vulnerability_path_scores.md and call_tree.md analysis. Supplement with "
+                f"the project's own test/example/sample inputs from /workspace/{project_name}/ "
+                f"as seed candidates when available."
             )
 
             # 追加用户提供的参考上下文（需 enabled 标志为 1）
@@ -665,9 +669,9 @@ def main():
     if args.easyfuzz:
         logger.info("EasyFuzz mode enabled")
         if args.phase is not None:
-            anyio.run(run_pipeline, args.target, str(work_dir), args.phase, args.phase, args.fuzz_timeout, easyfuzz=True)
+            anyio.run(run_pipeline, args.target, str(work_dir), args.phase, args.phase, args.fuzz_timeout, True)
         else:
-            anyio.run(run_pipeline, args.target, str(work_dir), 1, 2, args.fuzz_timeout, easyfuzz=True)
+            anyio.run(run_pipeline, args.target, str(work_dir), 1, 2, args.fuzz_timeout, True)
         logger.info("EasyFuzz pipeline finished")
         return
 

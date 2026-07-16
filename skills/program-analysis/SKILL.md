@@ -677,6 +677,9 @@ Scores are assigned based on vulnerability category (buffer overflow = 10, down 
 
 **Key risk**: <summary>
 
+<!-- Seeds 由 Step 6c 在创建种子文件后回填 -->
+**Seeds**: `seeds_<combo_id>/`
+
 ### 🥈 Rank 2: <full command> — Score: <N> — Coverage: <N>%
 ...
 
@@ -772,7 +775,7 @@ CFG_EOF
 
 #### 6c. Document in vulnerability_path_scores.md
 
-For each combination's rank entry, add seed info as a line under **Key risk**, describing how each seed reaches its target function:
+种子文件创建完毕后，**回到 `vulnerability_path_scores.md`，在每个 rank 条目的 `**Key risk**` 下方追加 `**Seeds**` 行**（Step 4 已预留 `<!-- Seeds 由 Step 6c 在创建种子文件后回填 -->` 注释标记位置）。描述每个种子如何到达目标路径：
 
 ```markdown
 ### 🥇 Rank 1: <full command> — Score: <N> — Coverage: <N>%
