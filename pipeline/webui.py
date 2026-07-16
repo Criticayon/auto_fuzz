@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -228,6 +230,26 @@ async def api_status(target: str = ""):
     }
 
 
+@app.get("/api/check-engine")
+async def api_check_engine():
+    """检查 Claude Code 引擎是否可用。"""
+    claude_path = shutil.which("claude")
+    if claude_path:
+        return {"available": True, "path": claude_path}
+    for p in [
+        os.path.expanduser("~/.claude/bin/claude"),
+        "/usr/local/bin/claude",
+        "/usr/bin/claude",
+    ]:
+        if os.path.exists(p):
+            return {"available": True, "path": p}
+    # 也检查 npm global
+    npm_claude = shutil.which("claude", path=os.environ.get("NPM_CONFIG_PREFIX", "") + "/bin")
+    if npm_claude:
+        return {"available": True, "path": npm_claude}
+    return {"available": False}
+
+
 # ──────────────────────────────────────────────
 # EasyFuzz API
 # ──────────────────────────────────────────────
@@ -262,6 +284,50 @@ async def api_easyfuzz_commands(target: str = ""):
     except Exception as e:
         logger.warning("[easyfuzz] failed to read commands: %s", e)
         return {"commands": []}
+
+
+@app.get("/api/easyfuzz/full-config")
+async def api_easyfuzz_full_config(target: str = ""):
+    """读取项目的全量 EasyFuzz 配置（fuzz 时长）。"""
+    if not target:
+        return {"configured": False}
+    path = BASE_DIR / "outputs" / target / "full_easyfuzz_config.json"
+    if not path.exists():
+        return {"configured": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"configured": True, "duration_min": data.get("duration_min", 30)}
+    except Exception:
+        return {"configured": False}
+
+
+@app.post("/api/easyfuzz/full-config")
+async def api_easyfuzz_save_full_config(target: str = "", request: Request = None):
+    """保存全量 EasyFuzz 配置（fuzz 时长，单位分钟）。"""
+    if not target:
+        return {"error": "no target"}
+    body = await request.json()
+    duration_min = int(body.get("duration_min", 30))
+    path = BASE_DIR / "outputs" / target / "full_easyfuzz_config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"duration_min": duration_min}), encoding="utf-8")
+    logger.info("[easyfuzz] full config saved for '%s': %d min", target, duration_min)
+    return {"status": "saved", "duration_min": duration_min}
+
+
+@app.get("/api/easyfuzz/full-result")
+async def api_easyfuzz_full_result(target: str = ""):
+    """读取全量 EasyFuzz 的完成结果。"""
+    if not target:
+        return {"has_result": False}
+    path = BASE_DIR / "outputs" / target / "full_easyfuzz_result.json"
+    if not path.exists():
+        return {"has_result": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"has_result": True, **data}
+    except Exception:
+        return {"has_result": False}
 
 
 @app.post("/api/easyfuzz/commands")
@@ -499,13 +565,42 @@ async def api_ref_context_get(target: str):
 
 
 @app.post("/api/pipeline/start")
-async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86400):
+async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86400, full_easyfuzz: int = 0):
     """启动 pipeline（在后台子进程运行）。"""
     import sys
     global _pipeline_proc, _current_target
     if _pipeline_proc and _pipeline_proc.poll() is None:
         return {"error": "pipeline already running"}
     target_path = str(BASE_DIR.parent / target)
+
+    # Full EasyFuzz pipeline: use --full-easyfuzz flag
+    if full_easyfuzz and _easyfuzz_enabled:
+        # Read configured duration
+        config_path = BASE_DIR / "outputs" / target / "full_easyfuzz_config.json"
+        if not config_path.exists():
+            return {"error": "full easyfuzz not configured"}
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            duration_min = config.get("duration_min", 30)
+        except Exception:
+            return {"error": "invalid config"}
+        # Remove previous result
+        result_path = BASE_DIR / "outputs" / target / "full_easyfuzz_result.json"
+        if result_path.exists():
+            result_path.unlink()
+        cmd = [
+            sys.executable or "python", "-m", "pipeline.orchestrator",
+            target_path, "--full-easyfuzz", str(duration_min)
+        ]
+        logger.info("[pipeline] starting full easyfuzz: %s (cwd=%s)", " ".join(cmd), BASE_DIR)
+        try:
+            _pipeline_proc = subprocess.Popen(cmd, cwd=str(BASE_DIR))
+        except Exception as e:
+            logger.error("[pipeline] failed to start: %s", e)
+            return {"error": f"subprocess error: {e}"}
+        _current_target = target
+        return {"status": "started", "target": target, "phase": phase, "full_easyfuzz": True}
+
     cmd = [sys.executable or "python", "-m", "pipeline.orchestrator", target_path, "--phase", str(phase)]
     if _easyfuzz_enabled:
         cmd.append("--easyfuzz")

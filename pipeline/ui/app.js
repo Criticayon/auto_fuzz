@@ -2,10 +2,32 @@ let polling = true;
 let logAtBottom = true;
 let chartInstances = {};
 let _lastChartData = null;
+let _engineAvailable = false;
+let _engineChecked = false;
+let _engineFailed = false;
 
 async function api(url, opts) {
   try { return await (await fetch(url, opts || {})).json(); }
   catch { return null; }
+}
+
+async function checkEngine() {
+  const gs = document.getElementById('globalStatus');
+  const r = await api('/api/check-engine');
+  _engineChecked = true;
+  if (r && r.available) {
+    _engineAvailable = true;
+    _engineFailed = false;
+    // Don't overwrite if updateDashboard already set a running/idle state
+    const currentBadge = gs.querySelector('.badge');
+    if (currentBadge && currentBadge.textContent.trim() === 'Starting...') {
+      gs.innerHTML = '<span class="badge badge-yellow"><span class="status-dot green"></span>Waiting for task...</span>';
+    }
+  } else {
+    _engineAvailable = false;
+    _engineFailed = true;
+    gs.innerHTML = '<span class="badge badge-red"><span class="status-dot red"></span>Engine Error</span>';
+  }
 }
 
 function switchPage(pageName) {
@@ -131,7 +153,10 @@ function updateDashboard() {
   const target = document.getElementById('targetSelect').value;
   loadManifest();
   api('/api/status' + (target ? `?target=${encodeURIComponent(target)}` : '')).then(d => {
-    if (!d) return;
+    if (!d) {
+      document.getElementById('globalStatus').innerHTML = '<span class="badge badge-red"><span class="status-dot gray"></span>Offline</span>';
+      return;
+    }
     document.getElementById('stratCount').textContent = d.total_strategies || '\u2014';
     document.getElementById('procCount').textContent = d.process_count;
     document.getElementById('totalEdges').textContent = (d.total_edges||0).toLocaleString();
@@ -167,8 +192,12 @@ function updateDashboard() {
       gs.innerHTML = '<span class="badge badge-green"><span class="status-dot green pulsing"></span>Pipeline Running</span>';
     } else if (d.running) {
       gs.innerHTML = '<span class="badge badge-green"><span class="status-dot green pulsing"></span>AFL++ Running</span>';
+    } else if (_engineChecked && _engineAvailable) {
+      gs.innerHTML = '<span class="badge badge-yellow"><span class="status-dot green"></span>Waiting for task...</span>';
+    } else if (_engineChecked && !_engineAvailable) {
+      // Engine Error already shown by checkEngine() — keep it
     } else {
-      gs.innerHTML = '<span class="badge badge-red"><span class="status-dot gray"></span>Idle</span>';
+      // Engine not checked yet — keep "Starting..."
     }
 
     // 按钮状态
@@ -186,10 +215,16 @@ function updateDashboard() {
     document.getElementById('clsPhase4').disabled = noTarget;
     document.getElementById('btnClean').disabled = running || noTarget;
     // Stop All 按钮：有正在跑的进程才显示
-    document.getElementById('btnStopAll').style.display = d.running ? 'inline-block' : 'none';
-    // 没选项目或没有 afl-fuzz 在跑时隐藏追加提示
+    // 根据运行状态更新 Phase 3 按钮和提示
+    const hasRunning = d.running;
+    document.getElementById('btnStopAll').style.display = hasRunning ? 'inline-block' : 'none';
     const tt = document.querySelector('.tooltip-wrap .tooltip-text');
-    if (tt) tt.style.display = (noTarget || !d.running) ? 'none' : '';
+    if (tt) {
+      tt.style.display = noTarget ? 'none' : '';
+      tt.textContent = hasRunning
+        ? '追加新策略到当前正在跑的 fuzz 进程中'
+        : '启动所有选中的策略进行 fuzz';
+    }
 
     // 项目显示 + 动画条
     const pBar = document.getElementById('projectBar');
@@ -410,8 +445,26 @@ async function startPipeline(phase) {
 
   if (phase === 3 && !document.getElementById('easyfuzzToggle').checked) {
     const refEnabled = document.getElementById('refEnabled').checked;
-    const ids = getSelectedStrategyIds();
-    if (!ids && !refEnabled) { alert('Please select at least one strategy.'); btn.disabled = false; return; }
+    let ids = getSelectedStrategyIds();
+    if (!ids) {
+      // 没有手动选中的策略 — 检查是否有 afl-fuzz 在跑
+      const statusData = await api('/api/status?target=' + encodeURIComponent(target));
+      const hasRunning = statusData && statusData.running;
+      if (hasRunning) {
+        // 有进程在跑但没选策略 — 提示用户
+        alert('请至少选择一个要追加的策略');
+        btn.disabled = false;
+        return;
+      }
+      // 没有进程在跑 — 自动选中全部策略
+      document.querySelectorAll('.strategy-cb').forEach(cb => cb.checked = true);
+      ids = getSelectedStrategyIds();
+      if (!ids) {
+        alert('没有可用策略，请先运行 Phase 2: Prep');
+        btn.disabled = false;
+        return;
+      }
+    }
     const sel = await api(`/api/manifest/select?target=${encodeURIComponent(target)}&strategy_ids=${ids}`, {method:'POST'});
     if (!sel || sel.error) {
       status.textContent = sel && sel.error ? sel.error : 'Failed to save strategy selection';
@@ -493,6 +546,14 @@ async function cleanWorkspace() {
   if (r && r.status === 'cleaned') {
     status.textContent = `Workspace cleaned for ${target}`;
     status.style.color = '#1a7f37';
+    // 清除本地状态
+    window._selectedNames = [];
+    window._selectedRef = '';
+    document.querySelectorAll('.strategy-cb').forEach(cb => cb.checked = false);
+    _fullFuzzStarted = false;
+    document.getElementById('fullFuzzNotify').style.display = 'none';
+    // 强制刷新界面
+    loadManifest();
     updateDashboard();
   } else {
     status.textContent = r && r.error ? r.error : 'Failed to clean';
@@ -620,6 +681,8 @@ function updateEasyFuzzUI(enabled) {
   const btn5 = document.getElementById('btnPhase5');
   const cls3 = document.getElementById('clsPhase3');
   const cls4 = document.getElementById('clsPhase4');
+  const fullGroup = document.getElementById('fullEasyFuzzGroup');
+  const gear = document.getElementById('btnFullEasyFuzzSettings');
   if (enabled) {
     btn1.textContent = 'Phase 1: Easy-Fuzz';
     btn2.textContent = 'Phase 2: Issues';
@@ -628,6 +691,8 @@ function updateEasyFuzzUI(enabled) {
     btn5.style.display = 'none';
     if (cls3) cls3.style.display = 'none';
     if (cls4) cls4.style.display = 'none';
+    if (fullGroup) fullGroup.style.display = '';
+    if (gear) gear.style.display = 'block';
     document.getElementById('selectAllLabel') && (document.getElementById('selectAllLabel').style.display = 'none');
     document.getElementById('strategiesStartSection') && (document.getElementById('strategiesStartSection').style.display = 'none');
   } else {
@@ -638,6 +703,8 @@ function updateEasyFuzzUI(enabled) {
     btn5.style.display = '';
     if (cls3) cls3.style.display = '';
     if (cls4) cls4.style.display = '';
+    if (fullGroup) fullGroup.style.display = 'none';
+    if (gear) gear.style.display = 'none';
     document.getElementById('selectAllLabel') && (document.getElementById('selectAllLabel').style.display = '');
     document.getElementById('strategiesStartSection') && (document.getElementById('strategiesStartSection').style.display = '');
   }
@@ -763,6 +830,136 @@ async function reRunEasyFuzzCommand() {
   await startPipeline(1);
 }
 
+// ──────────────────────────────────────────────
+// Full EasyFuzz Pipeline Functions
+// ──────────────────────────────────────────────
+
+let _fullFuzzStarted = false;
+
+async function startFullEasyFuzz() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) { alert('Please select a target project first.'); return; }
+  const status = document.getElementById('pipelineStatus');
+
+  // Check if already configured
+  const cfg = await api('/api/easyfuzz/full-config?target=' + encodeURIComponent(target));
+  if (!cfg || !cfg.configured) {
+    // First time: show dialog
+    showFullFuzzDialog();
+    return;
+  }
+
+  // Already configured: start the full pipeline
+  if (_fullFuzzStarted) {
+    status.textContent = 'Full pipeline already started.';
+    status.style.color = '#9a6700';
+    return;
+  }
+
+  status.textContent = 'Starting full pipeline (' + cfg.duration_min + 'min fuzz)...';
+  status.style.color = '#9a6700';
+
+  const r = await api('/api/pipeline/start?target=' + encodeURIComponent(target) +
+    '&phase=1&full_easyfuzz=1', {method:'POST'});
+  if (r && r.status === 'started') {
+    _fullFuzzStarted = true;
+    status.textContent = 'Full pipeline running — fuzzing for ' + cfg.duration_min + 'min...';
+    status.style.color = '#1a7f37';
+    // Clear old notification
+    document.getElementById('fullFuzzNotify').style.display = 'none';
+  } else {
+    status.textContent = r && r.error ? r.error : 'Failed to start';
+    status.style.color = '#cf222e';
+  }
+}
+
+function showFullFuzzDialog() {
+  document.getElementById('fullFuzzDialog').style.display = 'flex';
+  document.getElementById('fullFuzzSaveStatus').style.display = 'none';
+  document.getElementById('fuzzDurationInput').value = 720;
+}
+
+function closeFullFuzzDialog() {
+  document.getElementById('fullFuzzDialog').style.display = 'none';
+}
+
+async function saveFullFuzzConfig() {
+  const target = document.getElementById('targetSelect').value;
+  const duration = parseInt(document.getElementById('fuzzDurationInput').value) || 30;
+  const r = await api('/api/easyfuzz/full-config?target=' + encodeURIComponent(target), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({duration_min: duration})
+  });
+  if (r && r.status === 'saved') {
+    const status = document.getElementById('fullFuzzSaveStatus');
+    status.style.display = 'inline';
+    status.textContent = '\u2713 \u5df2\u8bbe\u7f6e\u5b8c\u6bd5\uff08' + duration + '\u5206\u949f\uff09';
+    setTimeout(() => {
+      closeFullFuzzDialog();
+    }, 1500);
+  }
+}
+
+async function checkFullEasyFuzzResult() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target || !_fullFuzzStarted) return;
+
+  // Check if pipeline is still running
+  const statusData = await api('/api/status?target=' + encodeURIComponent(target));
+  if (!statusData) return;
+
+  // Pipeline just finished (was running, now not)
+  if (statusData.pipeline_running) return; // still running
+
+  // Pipeline finished — check for result (with retry in case file not written yet)
+  for (let i = 0; i < 5; i++) {
+    const result = await api('/api/easyfuzz/full-result?target=' + encodeURIComponent(target));
+    if (result && result.has_result) {
+      _fullFuzzStarted = false;
+      showFullEasyFuzzNotification(result);
+      return;
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  // No result found — likely not a full easyfuzz pipeline that just finished
+  _fullFuzzStarted = false;
+}
+
+function showFullEasyFuzzNotification(result) {
+  const notify = document.getElementById('fullFuzzNotify');
+  const content = document.getElementById('fullFuzzNotifyContent');
+  const durationMin = result.duration_min || 0;
+  const crashes = result.crashes || 0;
+  const project = result.project || '';
+
+  let timeStr = '';
+  if (durationMin >= 60) {
+    const h = Math.floor(durationMin / 60);
+    const m = Math.round(durationMin % 60);
+    timeStr = h + '\u5c0f\u65f6' + (m > 0 ? m + '\u5206\u949f' : '');
+  } else {
+    timeStr = Math.round(durationMin) + '\u5206\u949f';
+  }
+
+  content.innerHTML = '\u2705 <strong>' + project + '</strong> \u9879\u76ee fuzz \u4e86' +
+    timeStr + '\uff0c\u53d1\u73b0\u4e86 <strong>' + crashes + '</strong> \u4e2a crash';
+
+  notify.style.display = 'block';
+
+  // Click to dismiss
+  notify.onclick = function() {
+    notify.style.display = 'none';
+  };
+}
+
+// Patch updateDashboard to check full easyfuzz result
+const _origUpdateDashboard = updateDashboard;
+updateDashboard = function() {
+  _origUpdateDashboard();
+  checkFullEasyFuzzResult();
+};
+
 // Patch updateDashboard to handle EasyFuzz mode
 const _origUpdateSelectedInfo = updateSelectedInfo;
 updateSelectedInfo = function() {
@@ -804,6 +1001,7 @@ api('/api/projects').then(d => {
 
 setInterval(updateDashboard, 5000);
 updateDashboard();
+checkEngine();
 
 const CODE_TOKENS = ['</>','{ }','0x00','afl','fuzz','/*..*/','for(;;)','while','if()','ptr->','++','!=','&&','||','SIGSEGV','ASAN','#include','[ ]','malloc','free','0xFF','{;}','==','!','main()','--','=>','::'];
 document.addEventListener('click', e => {

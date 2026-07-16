@@ -17,6 +17,7 @@ Vulnerability Discovery Pipeline — Claude Agent SDK 编排器
 """
 
 import anyio
+import json
 import logging
 import sys
 import time
@@ -323,7 +324,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
         phase_labels = ["", "Easy-Fuzz", "Crash Report & Issues"]
     else:
         phase_labels = ["", "Program Analysis", "Preprocess", "Execute Fuzz", "Issue Generator"]
-    actual_end = 2 if easyfuzz else end_phase
+    actual_end = min(2, end_phase) if easyfuzz else end_phase
     for num in range(start_phase, actual_end + 1):
         label = phase_labels[num]
 
@@ -370,10 +371,12 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                     f"CRITICAL: Do NOT delete, stop, restart, or modify the AFL++ container itself. "
                     f"Never run 'docker rm', 'docker stop', 'docker compose down', or any docker management commands on the host. "
                     f"All container operations must use container_exec tool only.\n"
-                    f"After fuzzing:\n"
+                    f"After launching fuzzing and verifying processes are running:\n"
                     f"  1. SAVE easy_fuzz_commands.json (host workdir: current directory)\n"
                     f"  2. Touch {EASY_CONT}/fuzz_started.signal\n"
                     f"  3. Also create fuzz_started.signal in the current directory (host workdir)\n"
+                    f"IMPORTANT: Do NOT wait for fuzzing results. Launch, verify, save, and exit. "
+                    f"Crash analysis happens in the next pipeline phase.\n"
                 )
                 mcp = {"container": create_container_server()}
 
@@ -610,6 +613,8 @@ def main():
     parser.add_argument("--phase", type=int, choices=[1, 2, 3, 4], default=None, help="只运行指定阶段（easyfuzz 模式下仅支持 1, 2）")
     parser.add_argument("--stop-fuzz", action="store_true", help="停止容器中所有 afl-fuzz 进程")
     parser.add_argument("--easyfuzz", action="store_true", help="EasyFuzz 2-phase 模式（Phase 1: 简单fuzz, Phase 2: crash报告）")
+    parser.add_argument("--full-easyfuzz", type=int, default=None,
+                        help="全量 EasyFuzz 模式：Phase 1 → 等待 N 分钟 → 停止 fuzz → Phase 2")
     parser.add_argument("--fuzz-timeout", type=int, default=DEFAULT_FUZZ_TIMEOUT,
                         help=f"Fuzz 超时秒数（默认 {DEFAULT_FUZZ_TIMEOUT}s = 24h，仅用于上下文）")
 
@@ -666,12 +671,76 @@ def main():
     else:
         start = 1
 
+    if args.full_easyfuzz:
+        logger.info("Full EasyFuzz mode enabled — duration: %d minutes", args.full_easyfuzz)
+        signal_path = Path(work_dir) / STOP_SIGNAL
+
+        # Phase 1: launch fuzzing
+        anyio.run(run_pipeline, args.target, str(work_dir), 1, 1, args.fuzz_timeout, True)
+
+        # Wait loop: sleep 10s intervals, check stop signal
+        fuzz_start = time.time()
+        deadline = fuzz_start + args.full_easyfuzz * 60
+        logger.info("[full-easyfuzz] fuzzing started, waiting %d min (until %s)...",
+                    args.full_easyfuzz,
+                    datetime.fromtimestamp(deadline).strftime("%H:%M:%S"))
+        while time.time() < deadline:
+            if signal_path.exists():
+                logger.info("[full-easyfuzz] stop signal received, aborting wait")
+                signal_path.unlink(missing_ok=True)
+                break
+            time.sleep(10)
+        actual_duration = time.time() - fuzz_start
+        logger.info("[full-easyfuzz] wait complete (actual fuzz duration: %.1f min)", actual_duration / 60)
+
+        # Stop afl-fuzz for this project
+        try:
+            mgr = ContainerManager(container_name=CONTAINER_NAME)
+            mgr.ensure_running()
+            stop_existing_fuzz(mgr, args.target)
+        except ContainerError as e:
+            logger.warning("[full-easyfuzz] failed to stop fuzz: %s", e)
+
+        # Phase 2: crash analysis
+        anyio.run(run_pipeline, args.target, str(work_dir), 2, 2, args.fuzz_timeout, True)
+
+        # Collect results
+        project_name = Path(args.target).name
+        crash_count = 0
+        crash_dir = work_dir / "crashes"
+        if crash_dir.exists():
+            crash_types = [d for d in crash_dir.iterdir() if d.is_dir()]
+            for ct in crash_types:
+                count_file = ct / "crash_count.txt"
+                if count_file.exists():
+                    try:
+                        crash_count += int(count_file.read_text().strip())
+                    except ValueError:
+                        crash_count += 1
+                else:
+                    crash_count += 1
+        result = {
+            "project": project_name,
+            "duration_min": round(actual_duration / 60, 1),
+            "crashes": crash_count,
+            "timestamp": datetime.now().isoformat(),
+        }
+        result_path = work_dir / "full_easyfuzz_result.json"
+        result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        logger.info("[full-easyfuzz] result: project=%s duration=%.1fmin crashes=%d",
+                    project_name, actual_duration / 60, crash_count)
+        print(f"[FULL_EASYTUZZ_COMPLETE] project={project_name} duration={actual_duration/60:.1f}m crashes={crash_count}")
+        return
+
     if args.easyfuzz:
         logger.info("EasyFuzz mode enabled")
         if args.phase is not None:
             anyio.run(run_pipeline, args.target, str(work_dir), args.phase, args.phase, args.fuzz_timeout, True)
         else:
-            anyio.run(run_pipeline, args.target, str(work_dir), 1, 2, args.fuzz_timeout, True)
+            # 默认只跑 Phase 1（启动 fuzz），Phase 2 由用户手动触发
+            anyio.run(run_pipeline, args.target, str(work_dir), 1, 1, args.fuzz_timeout, True)
+            logger.info("EasyFuzz Phase 1 complete — fuzzing running in background.")
+            logger.info("Run --easyfuzz --phase 2 later to analyze crashes.")
         logger.info("EasyFuzz pipeline finished")
         return
 

@@ -172,25 +172,34 @@ find $PROJ/test -type f -size -4k 2>/dev/null | head -5 | while read f; do cp "$
 
 ---
 
-## Phase 3: Fuzzing Campaign
+## Phase 3: Launch Fuzzing Campaign
 
-### Step 1: Wait for fuzzing to run
+**不要等待 fuzzing 完成。** 启动 afl-fuzz、验证进程在跑、保存命令、退出。Fuzzing 在后台持续运行，crash 分析由后续 Phase 2 处理。
 
-Monitor fuzzing progress. The fuzzing runs in the background. Wait for a reasonable amount of time to collect results.
+### Step 1: Launch each strategy
 
-### Step 2: Check for crashes
-
-Periodically check each strategy for crashes:
+For each strategy in your list, create seeds and launch afl-fuzz in background:
 
 ```bash
-for d in $FUZZ/out_*/; do
-  name=$(basename "$d")
-  crashes=$(ls "$d/crashes/" 2>/dev/null | wc -l)
-  echo "$name: $crashes crashes"
-done
+mkdir -p $FUZZ/seeds_<strategy>
+# Create minimal but valid seed file(s) for this strategy
+echo "..." > $FUZZ/seeds_<strategy>/seed1
+
+# Launch in background
+nohup afl-fuzz -i $FUZZ/seeds_<strategy> -o $FUZZ/out_<strategy> -m 4096 -t 5000 -- <binary> <flags> @@ > $FUZZ/out_<strategy>/fuzz.log 2>&1 &
 ```
 
-If crashes are found, stop the campaign and proceed to save results.
+### Step 2: Verify processes are running
+
+```bash
+ps aux | grep afl-fuzz | grep -v grep
+```
+
+Confirm each strategy has an afl-fuzz process. If any failed to start, check its log and re-launch.
+
+### Step 3: Do NOT wait
+
+Do NOT monitor fuzzing progress, do NOT check for crashes, do NOT wait for results. Proceed immediately to save commands and signal.
 
 ---
 

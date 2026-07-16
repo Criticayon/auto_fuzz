@@ -148,12 +148,16 @@
     <div class="page" data-page="pipeline">
       <div class="section-title" style="margin-top:0;">Pipeline Controls</div>
       <div class="controls">
-        <div class="phase-group"><button class="sticky-note" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button><button class="phase-clear" id="clsPhase1" onclick="cleanPhase(1)" disabled>clear</button></div>
-        <div class="phase-group"><button class="sticky-note" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button><button class="phase-clear" id="clsPhase2" onclick="cleanPhase(2)" disabled>clear</button></div>
-        <div class="phase-group"><div class="tooltip-wrap"><button class="sticky-note" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">追加新策略到当前正在跑的 fuzz 进程中</span></div><button class="phase-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
-        <div class="phase-group"><button class="sticky-note" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="phase-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
-        <div class="phase-group"><button class="sticky-note" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
-        <div><button class="sticky-note" id="btnClean" onclick="cleanWorkspace()">Clean All</button></div>
+        <button class="controls-gear" id="btnFullEasyFuzzSettings" onclick="showFullFuzzDialog()" title="设置 fuzz 时长">&#9881;</button>
+        <div class="phase-group"><button class="pipe-btn" id="btnPhase1" onclick="startPipeline(1)">Phase 1: Analyze</button><button class="pipe-clear" id="clsPhase1" onclick="cleanPhase(1)" disabled>clear</button></div>
+        <div class="phase-group"><button class="pipe-btn" id="btnPhase2" onclick="startPipeline(2)">Phase 2: Prep</button><button class="pipe-clear" id="clsPhase2" onclick="cleanPhase(2)" disabled>clear</button></div>
+        <div class="phase-group"><div class="tooltip-wrap"><button class="pipe-btn" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">启动 fuzz 策略</span></div><button class="pipe-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
+        <div class="phase-group"><button class="pipe-btn" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="pipe-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
+        <div class="phase-group"><button class="pipe-btn" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
+        <div class="phase-group" id="fullEasyFuzzGroup" style="display:none;">
+          <button class="pipe-btn full-fuzz-btn" id="btnFullEasyFuzz" onclick="startFullEasyFuzz()">&#9654; Full Pipeline</button>
+        </div>
+        <div><button class="pipe-btn pipe-btn-red" id="btnClean" onclick="cleanWorkspace()">Clean All</button></div>
         <span id="pipelineStatus" style="font-size:13px;color:#656d76;margin-left:8px;"></span>
       </div>
       <div id="selectedInfo" class="sel-info" style="display:none;">
@@ -228,10 +232,29 @@
 </div>
 
 
-<!-- Stale Strategy Notification -->
-<div id="staleNotify" style="display:none;">
-  <div class="sn-header">&#9888; Stale Strategies (2h+)</div>
-  <div id="staleList"></div>
+<!-- Full EasyFuzz Duration Dialog -->
+<div id="fullFuzzDialog" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-header">&#9881; 全量 Pipeline 设置</div>
+    <div class="modal-body">
+      <p style="margin:0 0 12px;font-size:14px;color:#24292f;">设置自动 fuzz 时长，到达指定时间后自动停止并分析 crash。</p>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:13px;color:#656d76;">Fuzz 时长：</span>
+        <input type="number" id="fuzzDurationInput" value="720" min="1" max="10080" style="width:80px;padding:6px 10px;border:1px solid #d0d7de;border-radius:4px;font-size:14px;">
+        <span style="font-size:13px;color:#656d76;">分钟</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span id="fullFuzzSaveStatus" style="font-size:13px;color:#1a7f37;display:none;">&#10003; 已设置完毕</span>
+      <button class="ref-btn ref-btn-default" onclick="closeFullFuzzDialog()">取消</button>
+      <button class="ref-btn ref-btn-primary" onclick="saveFullFuzzConfig()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- Full EasyFuzz Completion Notification -->
+<div id="fullFuzzNotify" style="display:none;">
+  <div class="ffn-content" id="fullFuzzNotifyContent"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
