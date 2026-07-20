@@ -17,6 +17,11 @@
     <div class="subtitle">Vulnerability Discovery Pipeline</div>
   </div>
   <div style="display:flex;align-items:center;gap:16px;">
+    <button id="btnKillFuzz" class="kill-fuzz-btn" onclick="stopAll()" title="Stop all fuzzing processes">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+        <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor"/>
+      </svg>
+    </button>
     <div class="easyfuzz-toggle-wrap">
       <label class="easyfuzz-toggle" title="EasyFuzz: 2-phase simplified fuzzing">
         <input type="checkbox" id="easyfuzzToggle" onchange="onEasyFuzzToggle()">
@@ -40,6 +45,7 @@
       <a class="nav-item" data-page="strategies"><span class="nav-icon">&#128203;</span> Strategies</a>
       <a class="nav-item" data-page="pipeline"><span class="nav-icon">&#9881;&#65039;</span> Pipeline</a>
       <a class="nav-item" data-page="report"><span class="nav-icon">&#128202;</span> Report</a>
+      <a class="nav-item" data-page="issues"><span class="nav-icon">&#128196;</span> Issues</a>
     </nav>
   </div>
 
@@ -68,6 +74,12 @@
           <div class="card"><div class="label">Crashes</div><div class="value red" id="totalCrashes">—</div></div>
           <div class="card"><div class="label">Stale (2h+)</div><div class="value" id="staleCount" style="color:#d4940c;">—</div></div>
         </div>
+      </div>
+
+      <!-- ===== EasyFuzz Full Pipeline Status ===== -->
+      <div class="dashboard-section" id="easyfuzzStatusSection" style="display:none;">
+        <div class="section-title" style="margin:0 0 12px;">&#9203; Full EasyFuzz Pipeline</div>
+        <div id="efCardContainer"></div>
       </div>
 
       <div class="dashboard-section" id="activeSection">
@@ -154,6 +166,9 @@
         <div class="phase-group"><div class="tooltip-wrap"><button class="pipe-btn" id="btnPhase3" onclick="startPipeline(3)">Phase 3: Fuzz</button><span class="tooltip-text">启动 fuzz 策略</span></div><button class="pipe-clear" id="clsPhase3" onclick="cleanPhase(3)" disabled>clear</button></div>
         <div class="phase-group"><button class="pipe-btn" id="btnPhase4" onclick="startPipeline(4)">Phase 4: Issues</button><button class="pipe-clear" id="clsPhase4" onclick="cleanPhase(4)" disabled>clear</button></div>
         <div class="phase-group"><button class="pipe-btn" id="btnPhase5" onclick="showSummary()">Phase 5: Summary</button></div>
+        <div class="phase-group" id="easyFuzzSummaryGroup" style="display:none;">
+          <button class="pipe-btn" id="btnEasyFuzzSummary" onclick="showSummary()" style="background:linear-gradient(135deg,#8250df,#6f42c1);">Phase 3: Summary</button>
+        </div>
         <div class="phase-group" id="fullEasyFuzzGroup" style="display:none;">
           <button class="pipe-btn full-fuzz-btn" id="btnFullEasyFuzz" onclick="startFullEasyFuzz()">&#9654; Full Pipeline</button>
         </div>
@@ -228,6 +243,46 @@
       </div>
     </div>
 
+    <!-- ===== Page: Issues ===== -->
+    <div class="page" data-page="issues">
+      <div class="section-title" style="margin-top:0;">Submit Issue</div>
+      <div class="issues-layout">
+        <div class="issues-left">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <select id="issueFileSelect" class="issues-select" onchange="onIssueFileSelect()">
+              <option value="">-- Select issue file --</option>
+            </select>
+            <button class="issues-btn" onclick="loadIssueFiles()" title="Refresh list">&#x1F504;</button>
+          </div>
+          <textarea id="issueEditor" class="issues-editor" spellcheck="false" placeholder="Select an issue file to edit..." readonly></textarea>
+          <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center;">
+            <button class="ref-btn ref-btn-primary" id="btnCopyIssue" onclick="copyIssueText()">&#128203; Copy</button>
+            <button class="ref-btn ref-btn-default" id="btnOpenGitHub" onclick="openGitHubIssue()" target="_blank">&#128279; Open on GitHub</button>
+            <span class="spacer" style="flex:1;"></span>
+            <span id="issueCopyStatus" style="font-size:12px;color:#1a7f37;display:none;">&#10003; Copied</span>
+          </div>
+        </div>
+        <div class="issues-right">
+          <div class="issues-right-toolbar" style="gap:6px;">
+            <span style="font-size:13px;font-weight:600;color:#656d76;">GitHub Issues</span>
+            <span id="issuesRepoLabel" style="font-size:11px;color:#8b949e;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+            <span class="spacer" style="flex:1;"></span>
+            <button class="issues-btn" id="btnRefreshIssues" onclick="loadGitHubIssues()" title="Refresh issues list">&#x1F504;</button>
+            <button class="issues-btn" onclick="openGitHubIssues()" title="Open issues page on GitHub">&#128279; Open</button>
+            <button class="issues-btn" onclick="openGitHubNewIssue()" title="Create new issue on GitHub">&#43; New</button>
+          </div>
+          <div id="issuesListContainer" class="issues-list-container">
+            <div id="issuesListPlaceholder" class="issues-frame-placeholder">
+              <div style="font-size:48px;margin-bottom:16px;">&#128196;</div>
+              <div style="font-size:16px;font-weight:600;color:#656d76;">GitHub Issues</div>
+              <div style="font-size:13px;color:#8b949e;margin-top:6px;">Issues from the GitHub repository will appear here.</div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -252,10 +307,8 @@
   </div>
 </div>
 
-<!-- Full EasyFuzz Completion Notification -->
-<div id="fullFuzzNotify" style="display:none;">
-  <div class="ffn-content" id="fullFuzzNotifyContent"></div>
-</div>
+<!-- Notification Stack (click-to-dismiss stacked notifications) -->
+<div id="notifStack"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>

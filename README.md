@@ -32,6 +32,8 @@ Phase 2: Issues     → 崩溃复现 + ASAN 去重 + 生成 GitHub Issue 报告�
 
 **命令更换功能**：Phase 1 保存所有 fuzz 命令到本地，Pipeline 页面提供编辑面板，可查看、修改、新增、重新执行命令。适合快速验证或针对性 fuzz。
 
+> ⚠ **EasyFuzz 全量模式（Full Pipeline）**：当前版本的全量模式还存在问题，正在修复中。建议使用手动阶段控制（依次执行 Phase 1 → Phase 2）或在 EasyFuzz 模式下人工编辑命令执行。
+
 每个阶段由 Claude Code agent 通过预定义的 skill 自主执行，中间结果持久化到 `outputs/<project>/`，支持断点续跑。
 
 ## 快速开始
@@ -121,6 +123,20 @@ python -m pipeline.webui
 - **Phase 5: Summary**：一键查看当前项目的完整 `SUMMARY.md` 报告
 - 点击后切换到全屏阅读模式，支持表格、代码块、标题等完整 Markdown 渲染
 - 切换项目或再次点击 Phase 5 退出汇总视图
+
+### Issue 提交
+
+Phase 4 生成的 Issue 报告可在 **Issues** 页面查看和提交：
+
+| 功能 | 说明 |
+|------|------|
+| **Issue 列表** | 左侧下拉选择 `outputs/<project>/issues/` 下的 `.md` 文件 |
+| **编辑** | 选中后可自由编辑 issue 文本内容，方便调整格式或补充信息 |
+| **复制** | 点击 Copy 一键复制到剪贴板，粘贴到 GitHub 即可提交 |
+| **GitHub Issues 浏览** | 右侧自动通过 GitHub API 拉取项目仓库的 issue 列表（无需 token） |
+| **快捷操作** | 工具栏提供 Open（打开 issue 列表）、+ New（创建新 issue）按钮 |
+
+仓库 URL 自动从项目的 `git remote get-url origin` 检测，无需手动配置。
 
 ### 工作空间管理
 

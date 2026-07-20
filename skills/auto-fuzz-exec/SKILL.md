@@ -229,12 +229,13 @@ done
 
 ### 3c. Initial Coverage Check & Seed Tuning
 
-After stable stats are confirmed, check each strategy's `bitmap_cvg` (AFL++ bitmap fill %). If it's below 1%, the seeds barely hit any code paths — the agent must study the strategy's command and craft targeted seeds.
+After stable stats are confirmed, check each strategy's `bitmap_cvg` (AFL++ bitmap fill %). If it's below 1%, the seeds barely hit any code paths — but **if the strategy has already found crashes (`saved_crashes > 0`), skip seed tuning entirely** and let it keep running, since crashes are already being discovered.
 
-| bitmap_cvg | Meaning | Action |
-|---|---|---|
-| ≥ 1% | ✅ Normal startup coverage | 继续 |
-| < 1% | 🚨 种子未命中目标路径 | 根据命令参数重新设计种子 |
+| Condition | Action |
+|---|---|
+| `saved_crashes > 0` | ✅ 已有 crash，跳过 seed tuning，直接继续 |
+| `bitmap_cvg ≥ 1%` 且无 crash | ✅ Normal startup coverage，继续 |
+| `bitmap_cvg < 1%` 且无 crash | 🚨 种子未命中目标路径，进入 seed tuning |
 
 ```bash
 # Check each strategy: flag if bitmap_cvg < 1%
@@ -257,7 +258,9 @@ for s in m['strategies']:
 done
 ```
 
-For each strategy listed in `/tmp/underperforming_strategies.txt`, enter the **seed tuning loop** (up to 10 attempts). The loop only exits when `bitmap_cvg >= 1%` or all 10 attempts are exhausted.
+For each strategy listed in `/tmp/underperforming_strategies.txt`, **first check if it already has crashes**. If `saved_crashes > 0` in its `fuzzer_stats`, remove it from the tuning list — crashes are already being found, no seed tuning needed.
+
+For remaining strategies, enter the **seed tuning loop** (up to 10 attempts). The loop only exits when `bitmap_cvg >= 1%` or all 10 attempts are exhausted.
 
 Each attempt must:
 1. **Study the strategy command** from the manifest — what flags/params does it use?
@@ -267,8 +270,16 @@ Each attempt must:
 5. **Verify bitmap_cvg after restart** — if still < 1%, retry with deeper analysis
 
 ```bash
-# Seed tuning loop per strategy
+# Seed tuning loop per strategy (only for low-coverage strategies with no crashes)
 for name in $(cat /tmp/underperforming_strategies.txt); do
+  # 跳过已有 crash 的策略 — crash 比 bitmap 更重要
+  stats_file="/workspace/fuzz_<project>/${outdir}/fuzzer_stats"
+  saved_crashes=$(grep "saved_crashes" "$stats_file" 2>/dev/null | cut -d: -f2 | tr -d ' ' || echo "0")
+  if [ "$saved_crashes" -gt 0 ]; then
+    echo "$name: already has crashes ($saved_crashes), skipping seed tuning"
+    continue
+  fi
+
   retry_file="/tmp/${name}_retry"
   retries=$(cat "$retry_file" 2>/dev/null || echo "0")
 
@@ -344,6 +355,7 @@ The agent should then **exit cleanly**. Do not wait, do not monitor, do not chec
 - Do NOT wait for fuzzing to complete (only wait for fuzzer_stats to appear + initial coverage check)
 - Do NOT modify the manifest or strategy commands (except rebuilding without ASAN when detected)
 - Do NOT use `-m none` — rebuild without ASAN instead and use `-m 4096`
-- Do NOT exit the tuning loop before bitmap_cvg >= 1% (unless all 10 attempts exhausted)
+- Do NOT exit the tuning loop before bitmap_cvg >= 1% (unless all 10 attempts exhausted, or the strategy already has crashes)
+- Do NOT waste time tuning seeds for strategies that are already producing crashes
 
-Launch, verify stable stats, tune seeds if needed (max 3 retries), signal, exit.
+Launch, verify stable stats, tune seeds if needed (max 10 retries, skip if already crashing), signal, exit.

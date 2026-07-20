@@ -20,6 +20,30 @@
   .easyfuzz-toggle input:checked + .easyfuzz-slider { background: #1a7f37; }
   .easyfuzz-toggle input:checked + .easyfuzz-slider::before { transform: translateX(16px); }
 
+  /* ===== Kill Fuzz Button ===== */
+  .kill-fuzz-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 24px;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+  .kill-fuzz-btn:hover {
+    background: rgba(220,68,55,0.6);
+    border-color: rgba(220,68,55,0.8);
+    color: #fff;
+  }
+  .kill-fuzz-btn:active {
+    transform: scale(0.92);
+  }
+
   /* ===== Sidebar Layout ===== */
   .app-layout { width: 100%; display: flex; position: relative; z-index: 1; min-height: 100vh; }
   .sidebar { width: 210px; flex-shrink: 0; background: #efe3d3; display: flex; flex-direction: column; border-right: 1px solid #e0d0be; }
@@ -318,6 +342,19 @@
   .status-dot.gray { background: #656d76; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   .pulsing { animation: pulse 1.5s ease-in-out infinite; }
+
+  /* EasyFuzz Full Pipeline Status Card */
+  .easyfuzz-status-card { background: #fefcf8; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px 20px; max-width: 420px; }
+  .ef-row { display: flex; align-items: center; padding: 4px 0; }
+  .ef-label { font-size: 12px; color: #656d76; width: 80px; flex-shrink: 0; font-weight: 500; }
+  .ef-value { font-size: 14px; color: #24292f; font-weight: 600; }
+  .ef-countdown { color: #0969da; font-variant-numeric: tabular-nums; }
+  .ef-progress-bar { margin-top: 10px; height: 22px; background: #eaeef2; border: 1px solid #d0d7de; position: relative; }
+  .ef-progress-fill { height: 100%; width: 0%; background: #1a7f37; transition: width 1s ease; box-sizing: border-box; }
+  .ef-progress-text { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: #24292f; line-height: 1; z-index: 1; }
+  .ef-status-running { color: #cf222e; }
+  .ef-status-done { color: #1a7f37; }
+
   .footer { text-align: center; padding: 24px; color: #8b949e; font-size: 12px; }
   .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; background: #f6f8fa; color: #656d76; margin-left: 8px; }
   .tooltip-wrap { position: relative; display: inline-block; }
@@ -403,49 +440,76 @@
   .code-burst { position: fixed; pointer-events: none; z-index: 9999; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; font-weight: 700; user-select: none; will-change: transform, opacity; animation: codeFloat 1.2s ease-out forwards; }
   @keyframes codeFloat { 0% { opacity: 1; transform: translate(0,0) rotate(0deg) scale(1); } 100% { opacity: 0; transform: translate(var(--dx),var(--dy)) rotate(var(--r)) scale(0.3); } }
 
-  /* ===== Stale Notification Bar ===== */
-  #staleNotify {
+  /* ===== Notification Stack ===== */
+  #notifStack {
     position: fixed;
     bottom: 0;
-    left: 0;
-    max-width: 320px;
-    background: #fffef8;
-    border: 1px solid #d0c4b4;
-    border-bottom: none;
-    border-left: none;
-    border-radius: 0 10px 0 0;
-    padding: 8px 14px 6px;
-    font-size: 12px;
-    color: #5b4d3e;
-    box-shadow: 2px -2px 12px rgba(0,0,0,0.06);
+    right: 0;
     z-index: 999;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 0 12px 12px 0;
+    pointer-events: none;
+    max-width: 420px;
+  }
+  #notifStack .notif-card {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 36px 12px 14px;
+    border-radius: 10px;
+    min-width: 280px;
+    max-width: 100%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+    position: relative;
+    animation: notifIn 0.35s ease-out;
     line-height: 1.5;
   }
-  #staleNotify .sn-header {
-    font-size: 11px;
-    color: #d4940c;
-    margin-bottom: 2px;
-    letter-spacing: 0.3px;
+  @keyframes notifIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
   }
-  #staleNotify .sn-item {
-    padding: 1px 0 1px 14px;
-    color: #656d76;
-    font-size: 11px;
-    position: relative;
-  }
-  #staleNotify .sn-item::before {
-    content: '';
+  .notif-card .notif-close {
     position: absolute;
-    left: 2px;
-    top: 7px;
-    width: 5px;
-    height: 5px;
-    background: #d4940c;
-    border-radius: 50%;
-    opacity: 0.6;
+    top: 6px; right: 8px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    color: inherit;
+    opacity: 0.5;
   }
+  .notif-card .notif-close:hover { opacity: 1; }
+  .notif-card .notif-icon { font-size: 18px; line-height: 1.4; flex-shrink: 0; }
+  .notif-card .notif-body { flex: 1; min-width: 0; }
+  .notif-card .notif-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+  .notif-card .notif-msg { font-size: 13px; opacity: 0.9; word-break: break-word; }
 
-  /* ===== Full EasyFuzz Pipeline Button ===== */
+  /* notification type variants */
+  .notif-card.notif-fuzz-done {
+    background: #1f2937;
+    color: #e2e8f0;
+    border: 1px solid #4a5568;
+  }
+  .notif-card.notif-fuzz-done .notif-title { color: #fbbf24; }
+  .notif-card.notif-phase4-done {
+    background: #f0fff4;
+    color: #1f5b2e;
+    border: 1px solid #b8e6c6;
+  }
+  .notif-card.notif-phase4-done .notif-title { color: #1a7f37; }
+  .notif-card.notif-stale {
+    background: #fffef8;
+    color: #5b4d3e;
+    border: 1px solid #d0c4b4;
+  }
+  .notif-card.notif-stale .notif-title { color: #d4940c; }
+
   .full-fuzz-btn:hover { filter: brightness(1.08) !important; }
 
   /* ===== Modal Dialog ===== */
@@ -478,6 +542,34 @@
   .modal-body {
     padding: 20px;
   }
+  /* ===== Issues Page ===== */
+  .issues-layout { display: flex; gap: 16px; min-height: calc(100vh - 200px); }
+  .issues-left { flex: 0 0 48%; display: flex; flex-direction: column; }
+  .issues-right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .issues-select { width: 100%; padding: 7px 10px; border-radius: 6px; font-size: 13px; border: 1px solid #d0c4b4; background: #fffef8; color: #24292f; font-family: inherit; cursor: pointer; }
+  .issues-select:focus { outline: none; border-color: #d4a373; box-shadow: 0 0 0 2px rgba(212,163,115,0.2); }
+  .issues-btn { padding: 6px 12px; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #24292f; cursor: pointer; font-weight: 500; transition: .15s; white-space: nowrap; }
+  .issues-btn:hover { background: #eaeef2; }
+  .issues-btn:active { transform: translateY(1px); }
+  .issues-editor { width: 100%; flex: 1; min-height: 400px; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px 14px; font-size: 13px; font-family: 'Cascadia Code','JetBrains Mono','Fira Code',Consolas,monospace; background: #fefcf8; color: #24292f; resize: vertical; line-height: 1.6; }
+  .issues-editor:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 2px #0969da22; }
+  .issues-right-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #faf5ed; border: 1px solid #d0d7de; border-radius: 8px 8px 0 0; flex-wrap: wrap; }
+  .issues-repo-input { flex: 1; min-width: 180px; padding: 6px 10px; font-size: 13px; border: 1px solid #d0c4b4; border-radius: 6px; background: #fffef8; color: #24292f; font-family: inherit; }
+  .issues-repo-input:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 2px #0969da22; }
+  .issues-list-container { flex: 1; border: 1px solid #d0d7de; border-radius: 0 0 8px 8px; background: #fefcf8; overflow-y: auto; min-height: 400px; }
+  .issues-list-container .issue-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; border-bottom: 1px solid #eaeef2; cursor: pointer; transition: background .1s; }
+  .issues-list-container .issue-item:hover { background: #f6f8fa; }
+  .issues-list-container .issue-item:last-child { border-bottom: none; }
+  .issues-list-container .issue-state { flex-shrink: 0; width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; }
+  .issues-list-container .issue-state.open { background: #1a7f37; }
+  .issues-list-container .issue-state.closed { background: #8250df; }
+  .issues-list-container .issue-title { font-size: 14px; font-weight: 600; color: #24292f; line-height: 1.3; }
+  .issues-list-container .issue-meta { font-size: 11px; color: #656d76; margin-top: 2px; }
+  .issues-list-container .issue-comments { flex-shrink: 0; font-size: 12px; color: #656d76; white-space: nowrap; }
+  .issues-list-container .issue-loading { text-align: center; padding: 40px; color: #8b949e; font-size: 13px; }
+  .issues-list-container .issue-error { text-align: center; padding: 40px; color: #cf222e; font-size: 13px; }
+  .issues-frame-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 400px; color: #8b949e; }
+
   .modal-footer {
     padding: 12px 20px;
     display: flex;
@@ -485,34 +577,4 @@
     justify-content: flex-end;
     gap: 8px;
     border-top: 1px solid #d0c4b4;
-  }
-
-  /* ===== Full EasyFuzz Completion Notification ===== */
-  #fullFuzzNotify {
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    max-width: 400px;
-    background: #1f2937;
-    border: 1px solid #4a5568;
-    border-bottom: none;
-    border-right: none;
-    border-radius: 10px 0 0 0;
-    padding: 14px 18px;
-    box-shadow: -2px -2px 16px rgba(0,0,0,0.15);
-    z-index: 999;
-    animation: ffnSlideIn 0.4s ease-out;
-  }
-  @keyframes ffnSlideIn {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-  }
-  .ffn-content {
-    font-size: 14px;
-    color: #e2e8f0;
-    line-height: 1.6;
-    font-weight: 500;
-  }
-  .ffn-content strong {
-    color: #fbbf24;
   }

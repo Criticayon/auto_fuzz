@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -30,6 +31,9 @@ _edge_history: dict[str, dict] = {}  # out_dir -> {"edges": int, "changed_at": f
 _STALE_THRESHOLD = 7200  # 2 hours in seconds
 _killed_strategies: list[dict] = []
 _easyfuzz_enabled: bool = False  # EasyFuzz toggle state  # 已终止的策略最终状态
+_full_easyfuzz_start: float | None = None
+_full_easyfuzz_duration: int = 0
+_full_easyfuzz_elapsed_saved: float | None = None  # pipeline 自然完成后的最终 elapsed，冻结不继续增长
 
 
 def get_client() -> docker.DockerClient:
@@ -47,14 +51,15 @@ def get_container():
 
 
 def docker_exec(cmd: str | list[str]) -> str:
-    c = get_container()
-    if c is None:
-        return ""
-    if isinstance(cmd, str):
-        cmd = ["sh", "-c", cmd]
+    """在容器内执行命令并返回 stdout。优先用 docker CLI（避免 SDK 连接缓存问题）。"""
+    if isinstance(cmd, list):
+        cmd = " ".join(cmd)
     try:
-        exit_code, output = c.exec_run(cmd)
-        return output.decode("utf-8", errors="replace").strip()
+        result = subprocess.run(
+            ["docker", "exec", CONTAINER_NAME, "sh", "-c", cmd],
+            capture_output=True, timeout=30,
+        )
+        return result.stdout.decode("utf-8", errors="replace").strip()
     except Exception:
         return ""
 
@@ -101,6 +106,26 @@ def _get_active_outdirs() -> set[str]:
     return set(_afl_outdirs(get_afl_processes()).keys())
 
 
+_FUZZER_STATS_KEYS = {
+    "edge_found": "edges_found",
+    "unique_crashes": "saved_crashes",
+    "paths_total": "corpus_count",
+    "exec_speed": "execs_per_sec",
+    "run_time": "run_time",
+    "cycles_done": "cycles_done",
+    "stability": "stability",
+    "bitmap_cvg": "bitmap_cvg",
+}
+
+
+def _parse_fuzzer_stats(info: dict, raw: str) -> None:
+    """解析 fuzzer_stats 文件内容并写入 info dict。"""
+    for line in raw.split("\n"):
+        for key, alias in _FUZZER_STATS_KEYS.items():
+            if line.startswith(alias):
+                info[key] = line.split(":", 1)[-1].strip()
+
+
 def get_outdir_stats() -> list[dict]:
     """从 afl-fuzz 进程提取统计数据 + 进程信息。即使 fuzzer_stats 还未生成也返回基础信息。"""
     procs = get_afl_processes()
@@ -119,17 +144,7 @@ def get_outdir_stats() -> list[dict]:
             "full_cmd": proc["cmd"],
         }
         if raw:
-            for line in raw.split("\n"):
-                for key, alias in {"edge_found": "edges_found",
-                                   "unique_crashes": "saved_crashes",
-                                   "paths_total": "corpus_count",
-                                   "exec_speed": "execs_per_sec",
-                                   "run_time": "run_time",
-                                   "cycles_done": "cycles_done",
-                                   "stability": "stability",
-                                   "bitmap_cvg": "bitmap_cvg"}.items():
-                    if line.startswith(alias):
-                        info[key] = line.split(":", 1)[-1].strip()
+            _parse_fuzzer_stats(info, raw)
         stats_list.append(info)
 
     # 如果没有任何 -o 参数可解析，直接用进程信息兜底
@@ -163,7 +178,7 @@ def list_projects() -> list[str]:
 
 @app.get("/api/status")
 async def api_status(target: str = ""):
-    global _edge_history, _killed_strategies
+    global _edge_history, _killed_strategies, _pipeline_proc, _current_target, _full_easyfuzz_elapsed_saved
     procs = get_afl_processes()
     stats = get_outdir_stats()
 
@@ -202,9 +217,16 @@ async def api_status(target: str = ""):
     active_dirs = {s["path"] for s in stats}
     _edge_history = {k: v for k, v in _edge_history.items() if k in active_dirs}
 
+    # 自动清理：pipeline 子进程自然退出后更新状态
+    if _pipeline_proc is not None and _pipeline_proc.poll() is not None:
+        if _full_easyfuzz_start is not None and _full_easyfuzz_elapsed_saved is None:
+            _full_easyfuzz_elapsed_saved = time.time() - _full_easyfuzz_start
+        _pipeline_proc = None
+        _current_target = None
+
     # 读取 manifest 中的策略总数（只读本地）
     total_strategies = 0
-    effective_target = _current_target or target
+    effective_target = target or _current_target
     if effective_target:
         mp = BASE_DIR / "outputs" / effective_target / "fuzz_manifest.json"
         if mp.exists():
@@ -213,6 +235,13 @@ async def api_status(target: str = ""):
                 total_strategies = len(md.get("strategies", []))
             except Exception:
                 pass
+
+    # 计算 full_easyfuzz 最终 elapsed（冻结值优先）
+    ef_elapsed: float = 0
+    if _full_easyfuzz_elapsed_saved is not None:
+        ef_elapsed = _full_easyfuzz_elapsed_saved
+    elif _full_easyfuzz_start is not None:
+        ef_elapsed = time.time() - _full_easyfuzz_start
 
     return {
         "running": len(procs) > 0,
@@ -227,6 +256,12 @@ async def api_status(target: str = ""):
         "pipeline_running": _pipeline_proc is not None and _pipeline_proc.poll() is None,
         "current_target": _current_target,
         "easyfuzz_enabled": _easyfuzz_enabled,
+        "full_easyfuzz": {
+            "running": _full_easyfuzz_start is not None and _pipeline_proc is not None and _pipeline_proc.poll() is None,
+            "total_min": _full_easyfuzz_duration,
+            "elapsed_min": round(ef_elapsed / 60, 1) if ef_elapsed else 0,
+            "remaining_min": max(0, round(_full_easyfuzz_duration - ef_elapsed / 60, 1)) if _full_easyfuzz_start else 0,
+        }
     }
 
 
@@ -317,17 +352,34 @@ async def api_easyfuzz_save_full_config(target: str = "", request: Request = Non
 
 @app.get("/api/easyfuzz/full-result")
 async def api_easyfuzz_full_result(target: str = ""):
-    """读取全量 EasyFuzz 的完成结果。"""
-    if not target:
-        return {"has_result": False}
-    path = BASE_DIR / "outputs" / target / "full_easyfuzz_result.json"
-    if not path.exists():
-        return {"has_result": False}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return {"has_result": True, **data}
-    except Exception:
-        return {"has_result": False}
+    """读取全量 EasyFuzz 的完成结果。不指定 target 则返回所有项目的结果。"""
+    if target:
+        path = BASE_DIR / "outputs" / target / "full_easyfuzz_result.json"
+        if not path.exists():
+            return {"has_result": False}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {"has_result": True, **data}
+        except Exception:
+            return {"has_result": False}
+
+    # 无 target: 扫描所有项目目录，返回所有结果
+    outputs_dir = BASE_DIR / "outputs"
+    if not outputs_dir.exists():
+        return {"has_result": False, "results": []}
+    results = []
+    for proj_dir in sorted(outputs_dir.iterdir()):
+        if not proj_dir.is_dir():
+            continue
+        result_path = proj_dir / "full_easyfuzz_result.json"
+        if result_path.exists():
+            try:
+                data = json.loads(result_path.read_text(encoding="utf-8"))
+                data["project"] = data.get("project", proj_dir.name)
+                results.append(data)
+            except Exception:
+                pass
+    return {"has_result": len(results) > 0, "results": results}
 
 
 @app.post("/api/easyfuzz/commands")
@@ -341,6 +393,44 @@ async def api_easyfuzz_save_commands(target: str = "", request: Request = None):
     path.write_text(json.dumps(body, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info("[easyfuzz] commands saved for '%s' (%d commands)", target, len(body.get("commands", [])))
     return {"status": "saved", "target": target}
+
+
+def _start_pipeline_proc(cmd: list[str]) -> subprocess.Popen | None:
+    """启动 pipeline 子进程，检测是否立即崩溃，并记录 stderr。"""
+    stderr_path = os.path.join(
+        BASE_DIR, "outputs",
+        f"pipeline_stderr_{int(time.time())}.log"
+    )
+
+    try:
+        stderr_file = open(stderr_path, "wb")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(BASE_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+        )
+        stderr_file.close()  # 子进程已继承 fd，可以关闭
+
+        # 等待 1s 让子进程完成初始化，避免 race
+        time.sleep(1)
+        exit_code = proc.poll()
+        if exit_code is not None:
+            # 子进程已退出 — 读取 stderr 诊断
+            with open(stderr_path, "r", encoding="utf-8", errors="replace") as f:
+                err_text = f.read()[:3000]
+            logger.error("[pipeline] subprocess exited immediately (code=%s)", exit_code)
+            if err_text.strip():
+                logger.error("[pipeline] stderr:\n%s", err_text)
+            else:
+                logger.error("[pipeline] stderr is empty — Python may not have found the module")
+            return None
+        else:
+            logger.info("[pipeline] subprocess running (PID=%s, stderr=%s)", proc.pid, stderr_path)
+            return proc
+    except Exception as e:
+        logger.error("[pipeline] failed to start subprocess: %s", e)
+        return None
 
 
 def clean_workspace(target: str) -> dict:
@@ -370,7 +460,6 @@ def clean_workspace(target: str) -> dict:
 
     # 4) 清空本机 output 目录
     logger.info("[clean] removing host output dir: %s", host_dir)
-    import shutil
     if host_dir.exists():
         shutil.rmtree(str(host_dir))
         logger.info("[clean] host output dir removed")
@@ -398,7 +487,6 @@ async def api_phase_clean(target: str, phase: int):
         return {"error": "pipeline is running, stop it first"}
     project_name = Path(target).name
     host_dir = BASE_DIR / "outputs" / project_name
-    import shutil
 
     if phase == 1:
         # Phase 1: 分析文件 + 种子 + 容器源码
@@ -567,7 +655,6 @@ async def api_ref_context_get(target: str):
 @app.post("/api/pipeline/start")
 async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86400, full_easyfuzz: int = 0):
     """启动 pipeline（在后台子进程运行）。"""
-    import sys
     global _pipeline_proc, _current_target
     if _pipeline_proc and _pipeline_proc.poll() is None:
         return {"error": "pipeline already running"}
@@ -584,6 +671,11 @@ async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86
             duration_min = config.get("duration_min", 30)
         except Exception:
             return {"error": "invalid config"}
+        # Track full easyfuzz state
+        global _full_easyfuzz_start, _full_easyfuzz_duration, _full_easyfuzz_elapsed_saved
+        _full_easyfuzz_start = time.time()
+        _full_easyfuzz_duration = duration_min
+        _full_easyfuzz_elapsed_saved = None
         # Remove previous result
         result_path = BASE_DIR / "outputs" / target / "full_easyfuzz_result.json"
         if result_path.exists():
@@ -593,11 +685,10 @@ async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86
             target_path, "--full-easyfuzz", str(duration_min)
         ]
         logger.info("[pipeline] starting full easyfuzz: %s (cwd=%s)", " ".join(cmd), BASE_DIR)
-        try:
-            _pipeline_proc = subprocess.Popen(cmd, cwd=str(BASE_DIR))
-        except Exception as e:
-            logger.error("[pipeline] failed to start: %s", e)
-            return {"error": f"subprocess error: {e}"}
+        proc = _start_pipeline_proc(cmd)
+        if proc is None:
+            return {"error": "subprocess exited immediately — check server log for stderr"}
+        _pipeline_proc = proc
         _current_target = target
         return {"status": "started", "target": target, "phase": phase, "full_easyfuzz": True}
 
@@ -607,14 +698,10 @@ async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86
     if phase == 2:
         cmd.extend(["--fuzz-timeout", str(fuzz_timeout)])
     logger.info("[pipeline] starting: %s (cwd=%s)", " ".join(cmd), BASE_DIR)
-    try:
-        _pipeline_proc = subprocess.Popen(
-            cmd,
-            cwd=str(BASE_DIR),
-        )
-    except Exception as e:
-        logger.error("[pipeline] failed to start: %s", e)
-        return {"error": f"subprocess error: {e}"}
+    proc = _start_pipeline_proc(cmd)
+    if proc is None:
+        return {"error": "subprocess exited immediately — check server log for stderr"}
+    _pipeline_proc = proc
     _current_target = target
     return {"status": "started", "target": target, "phase": phase}
 
@@ -622,7 +709,7 @@ async def api_pipeline_start(target: str, phase: int = 2, fuzz_timeout: int = 86
 @app.post("/api/pipeline/stop")
 async def api_pipeline_stop():
     """停止 pipeline 子进程 + 清理容器内 afl-fuzz。"""
-    global _pipeline_proc, _current_target, _killed_strategies
+    global _pipeline_proc, _current_target, _killed_strategies, _full_easyfuzz_start, _full_easyfuzz_duration
 
     # 1) 收集所有 afl-fuzz 的最终状态，存入 killed_strategies
     stats = get_outdir_stats()
@@ -652,11 +739,12 @@ async def api_pipeline_stop():
         stop_path.touch(exist_ok=True)
         logger.info("[stop] signal sent -> %s", stop_path)
 
+    total_crashes = sum(int(s.get("unique_crashes", 0)) for s in stats)
     proc = _pipeline_proc
     if proc is None or proc.poll() is not None:
         # 进程已不在运行，仅清理 afl-fuzz
         docker_exec("kill -9 $(ps aux | grep afl-fuzz | grep -v grep | awk '{print $2}') 2>/dev/null || true")
-        return {"status": "stopped", "total_crashes": 0}
+        return {"status": "stopped", "total_crashes": total_crashes}
 
     # 3) 等待进程优雅退出（orchestrator 收到信号后调用 client.disconnect() + 清理 afl-fuzz）
     try:
@@ -668,13 +756,157 @@ async def api_pipeline_stop():
 
     _pipeline_proc = None
     _current_target = None
+    _full_easyfuzz_start = None
+    _full_easyfuzz_duration = 0
+    _full_easyfuzz_elapsed_saved = None
 
     # 4) 保险：清理容器内残留的 afl-fuzz
     docker_exec("kill -9 $(ps aux | grep afl-fuzz | grep -v grep | awk '{print $2}') 2>/dev/null || true")
 
-    total_crashes = sum(int(s.get("unique_crashes", 0)) for s in stats)
     logger.info("[stop] done, total crashes: %s", total_crashes)
     return {"status": "stopped", "total_crashes": total_crashes}
+
+
+# ──────────────────────────────────────────────
+# Issue Submission APIs
+# ──────────────────────────────────────────────
+
+
+@app.get("/api/issues/list")
+async def api_issues_list(target: str = ""):
+    """列出项目下的 issue 文件列表。"""
+    if not target:
+        return {"files": []}
+    issues_dir = BASE_DIR / "outputs" / target / "issues"
+    if not issues_dir.exists():
+        return {"files": []}
+    files = sorted([f.name for f in issues_dir.iterdir() if f.suffix == ".md"])
+    return {"files": files}
+
+
+@app.get("/api/issues/content")
+async def api_issues_content(target: str = "", file: str = ""):
+    """获取某个 issue 文件的内容。"""
+    if not target or not file:
+        return {"content": ""}
+    issues_dir = BASE_DIR / "outputs" / target / "issues"
+    file_path = issues_dir / file
+    # 安全检查：确保文件在 issues 目录下
+    if not file_path.exists() or not str(file_path.resolve()).startswith(str(issues_dir.resolve())):
+        return {"content": ""}
+    content = file_path.read_text(encoding="utf-8")
+    return {"content": content, "name": file}
+
+
+@app.get("/api/issues/repo-url")
+async def api_issues_repo_url(target: str = ""):
+    """读取项目的 GitHub repo URL。"""
+    if not target:
+        return {"repo_url": ""}
+    path = BASE_DIR / "outputs" / target / "repo_url.txt"
+    url = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+    return {"repo_url": url}
+
+
+@app.post("/api/issues/repo-url")
+async def api_issues_save_repo_url(target: str = "", request: Request = None):
+    """保存项目的 GitHub repo URL。"""
+    if not target:
+        return {"error": "no target"}
+    body = await request.json()
+    url = body.get("repo_url", "").strip()
+    path = BASE_DIR / "outputs" / target / "repo_url.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(url, encoding="utf-8")
+    return {"status": "saved", "repo_url": url}
+
+
+@app.get("/api/issues/github-list")
+async def api_issues_github_list(target: str = ""):
+    """通过 GitHub API 获取项目的 issue 列表（无需 token，公开仓库只读）。"""
+    if not target:
+        return {"issues": []}
+
+    # 从 git remote 获取 owner/repo
+    proj_dir = BASE_DIR.parent / target
+    if not proj_dir.exists():
+        return {"issues": []}
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(proj_dir), capture_output=True, text=True, timeout=5,
+        )
+        url = result.stdout.strip()
+        if not url:
+            return {"issues": []}
+        # 解析 owner/repo
+        if url.startswith("git@"):
+            repo_path = url.split(":")[-1]
+        elif "github.com" in url:
+            repo_path = url.split("github.com/")[-1]
+        else:
+            return {"issues": []}
+        repo_path = repo_path.replace(".git", "")
+        # 调用 GitHub API（用 curl 避免代理/DNS 问题）
+        api_url = f"https://api.github.com/repos/{repo_path}/issues?state=all&per_page=20&sort=updated"
+        curl_result = subprocess.run(
+            ["curl", "-s", "--connect-timeout", "5", "--max-time", "10",
+             "-w", "\n%{http_code}",
+             "-H", "User-Agent: auto-fuzz/1.0", api_url],
+            capture_output=True, timeout=15,
+        )
+        raw = curl_result.stdout.decode("utf-8", errors="replace")
+        # 最后一行是 HTTP 状态码
+        lines = raw.strip().split("\n")
+        http_code = lines[-1].strip() if lines else "000"
+        body = "\n".join(lines[:-1]) if len(lines) > 1 else ""
+        if not body and curl_result.stderr:
+            logger.warning("[github-api] stderr: %s", curl_result.stderr.decode("utf-8", errors="replace")[:500])
+        if http_code != "200":
+            logger.warning("[github-api] HTTP %s for %s", http_code, api_url)
+            return {"issues": [], "error": f"HTTP {http_code}"}
+        data = json.loads(body) if body else []
+        issues = []
+        for item in data:
+            issues.append({
+                "number": item.get("number"),
+                "title": item.get("title"),
+                "state": item.get("state"),
+                "url": item.get("html_url"),
+                "created_at": item.get("created_at", ""),
+                "updated_at": item.get("updated_at", ""),
+                "comments": item.get("comments", 0),
+            })
+        return {"issues": issues, "repo": repo_path}
+    except Exception as e:
+        return {"issues": [], "error": str(e)}
+
+
+@app.get("/api/issues/detect-repo-url")
+async def api_issues_detect_repo_url(target: str = ""):
+    """从项目 git remote 自动检测仓库 URL。"""
+    if not target:
+        return {"repo_url": ""}
+    proj_dir = BASE_DIR.parent / target
+    if not proj_dir.exists():
+        return {"repo_url": ""}
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(proj_dir),
+            capture_output=True, text=True, timeout=5,
+        )
+        url = result.stdout.strip()
+        if url:
+            # 将 git URL 转为 HTTPS 格式：git@github.com:user/repo.git → https://github.com/user/repo
+            if url.startswith("git@"):
+                url = url.replace(":", "/").replace("git@", "https://")
+            if url.endswith(".git"):
+                url = url[:-4]
+            return {"repo_url": url}
+    except Exception:
+        pass
+    return {"repo_url": ""}
 
 
 @app.get("/api/summary")
@@ -734,7 +966,6 @@ async def index():
 
 
 def main(port: int = 8765):
-    import sys
     if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "gb18030"):
         globe = "[globe]"
     else:

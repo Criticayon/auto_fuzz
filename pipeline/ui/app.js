@@ -5,6 +5,37 @@ let _lastChartData = null;
 let _engineAvailable = false;
 let _engineChecked = false;
 let _engineFailed = false;
+let _notifKeys = new Set();       // 通知去重（已关闭的通知 key）
+// 从 localStorage 恢复已关闭的通知，让它们跨页面刷新不重新出现
+try {
+  var saved = localStorage.getItem('af_dismissed');
+  if (saved) {
+    var arr = JSON.parse(saved);
+    for (var i = 0; i < arr.length; i++) _notifKeys.add(arr[i]);
+  }
+} catch(e) {}
+let _phase4Running = false;       // 普通模式 Phase 4 是否在运行
+let _efCards = {};                // Full EasyFuzz 状态卡片（按项目名索引）
+
+function addNotification(type, title, msg, keySuffix) {
+  const stack = document.getElementById('notifStack');
+  if (!stack) return;
+  // dedup key: type + suffix 保证稳定，不受 msg 内容变化影响
+  var key = type;
+  if (keySuffix) key += '|' + keySuffix;
+  if (_notifKeys.has(key)) return;
+  _notifKeys.add(key);
+  // 持久化到 localStorage，刷新页面后不再弹出同一条通知
+  try { localStorage.setItem('af_dismissed', JSON.stringify([..._notifKeys])); } catch(e) {}
+  const icons = {'fuzz-done':'✅','phase4-done':'🎯','stale':'⚠️'};
+  const card = document.createElement('div');
+  card.className = 'notif-card notif-' + type;
+  card.innerHTML = '<button class="notif-close">&times;</button>' +
+    '<span class="notif-icon">' + (icons[type]||'📌') + '</span>' +
+    '<div class="notif-body"><div class="notif-title">' + title + '</div><div class="notif-msg">' + msg + '</div></div>';
+  card.querySelector('.notif-close').onclick = function() { card.remove(); };
+  stack.prepend(card);
+}
 
 async function api(url, opts) {
   try { return await (await fetch(url, opts || {})).json(); }
@@ -52,6 +83,10 @@ function switchPage(pageName) {
   if (pageName === 'dashboard' && _lastChartData) {
     // Re-render charts after page becomes visible (canvases lose dimensions when hidden)
     setTimeout(() => updateCharts(_lastChartData), 50);
+  }
+  if (pageName === 'issues') {
+    loadIssueFiles();
+    loadGitHubIssues();
   }
 }
 
@@ -151,7 +186,16 @@ function updateCharts(d) {
 
 function updateDashboard() {
   const target = document.getElementById('targetSelect').value;
+  const noTarget = !target;
   loadManifest();
+
+  // 清除按钮：不依赖 API，立即更新
+  document.getElementById('clsPhase1').disabled = noTarget;
+  document.getElementById('clsPhase2').disabled = noTarget;
+  document.getElementById('clsPhase3').disabled = noTarget;
+  document.getElementById('clsPhase4').disabled = noTarget;
+  document.getElementById('btnClean').disabled = noTarget;
+
   api('/api/status' + (target ? `?target=${encodeURIComponent(target)}` : '')).then(d => {
     if (!d) {
       document.getElementById('globalStatus').innerHTML = '<span class="badge badge-red"><span class="status-dot gray"></span>Offline</span>';
@@ -163,19 +207,64 @@ function updateDashboard() {
     document.getElementById('totalCrashes').textContent = (d.total_crashes||0).toLocaleString();
     document.getElementById('staleCount').textContent = d.stale_count || 0;
 
-    // 左下角过期策略通知
-    const staleNotify = document.getElementById('staleNotify');
-    const staleList = document.getElementById('staleList');
+    // 过期策略通知（堆叠通知，不会自动消失）
     const staleStrats = (d.strategies||[]).filter(s => s.stale).map(s => s.name);
     if (target && staleStrats.length) {
-      staleList.innerHTML = staleStrats.map(n => '<div class="sn-item">' + n + '</div>').join('');
-      staleNotify.style.display = 'block';
-    } else {
-      staleNotify.style.display = 'none';
+      addNotification('stale', 'Stale Strategies (' + staleStrats.length + ')',
+        staleStrats.join(', '));
+    }
+
+    // Full EasyFuzz 状态卡片（多项目持久卡片）
+    const efSection = document.getElementById('easyfuzzStatusSection');
+    const efCardContainer = document.getElementById('efCardContainer');
+    const ef = d.full_easyfuzz;
+    const curTarget = d.current_target || target;
+    if (ef && (ef.running || ef.elapsed_min > 0)) {
+      efSection.style.display = 'block';
+      const total = ef.total_min;
+      const totalEstimated = total + 10;
+      const elapsed = Math.round(ef.elapsed_min);
+      const remaining = Math.max(0, Math.round(totalEstimated - elapsed));
+      const elapsedStr = elapsed >= 60 ? Math.floor(elapsed/60)+'h '+elapsed%60+'m' : elapsed+'m';
+      const remainStr = '约' + (remaining >= 60 ? Math.floor(remaining/60)+'h '+remaining%60+'m' : remaining+'m');
+      const totalStr = total >= 60 ? Math.floor(total/60)+'h '+total%60+'m' : total+'m';
+      const pct = ef.running ? Math.min(99, Math.round((elapsed / totalEstimated) * 100)) : 100;
+      // 查找或创建该项目的卡片
+      let card = _efCards[curTarget];
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'easyfuzz-status-card';
+        card.dataset.project = curTarget;
+        card.innerHTML =
+          '<div class="ef-row"><span class="ef-label">Project</span><span class="ef-value ef-project-name">' + curTarget + '</span></div>' +
+          '<div class="ef-row"><span class="ef-label">Status</span><span class="ef-value ef-status-text"></span></div>' +
+          '<div class="ef-row"><span class="ef-label">Elapsed</span><span class="ef-value ef-elapsed"></span></div>' +
+          '<div class="ef-row"><span class="ef-label">Remaining</span><span class="ef-value ef-remaining"></span></div>' +
+          '<div class="ef-row"><span class="ef-label">Fuzz Time</span><span class="ef-value ef-fuzz-time"></span></div>' +
+          '<div class="ef-progress-bar"><div class="ef-progress-fill"><span class="ef-progress-text"></span></div></div>';
+        efCardContainer.appendChild(card);
+        _efCards[curTarget] = card;
+      }
+      // 更新卡片内容
+      card.querySelector('.ef-elapsed').textContent = elapsedStr;
+      card.querySelector('.ef-remaining').textContent = remainStr;
+      card.querySelector('.ef-fuzz-time').textContent = totalStr;
+      const fill = card.querySelector('.ef-progress-fill');
+      const pctText = card.querySelector('.ef-progress-text');
+      fill.style.width = pct + '%';
+      pctText.textContent = pct + '%';
+      const statusEl = card.querySelector('.ef-status-text');
+      if (ef.running) {
+        statusEl.textContent = 'Running...';
+        statusEl.className = 'ef-value ef-status-running';
+      } else {
+        statusEl.textContent = 'Completed';
+        statusEl.className = 'ef-value ef-status-done';
+      }
     }
 
     _lastChartData = d;
-    updateCharts(d);
+    try { updateCharts(d); } catch (e) { /* chart.js not available */ }
 
     // Sync EasyFuzz toggle with server state
     if (d.easyfuzz_enabled !== undefined) {
@@ -201,23 +290,19 @@ function updateDashboard() {
     }
 
     // 按钮状态
-    const noTarget = !document.getElementById('targetSelect').value;
     const pipelineBusy = d.pipeline_running || false;
     const easyfuzzOn = document.getElementById('easyfuzzToggle').checked;
     document.getElementById('btnPhase1').disabled = running || noTarget;
     document.getElementById('btnPhase2').disabled = running || noTarget;
-    document.getElementById('btnPhase3').disabled = pipelineBusy || noTarget || easyfuzzOn;
+    document.getElementById('btnPhase3').disabled = easyfuzzOn ? noTarget : (pipelineBusy || noTarget);
     document.getElementById('btnPhase4').disabled = pipelineBusy || noTarget || easyfuzzOn;
     document.getElementById('btnPhase5').disabled = noTarget || easyfuzzOn;
-    document.getElementById('clsPhase1').disabled = noTarget;
-    document.getElementById('clsPhase2').disabled = noTarget;
-    document.getElementById('clsPhase3').disabled = noTarget;
-    document.getElementById('clsPhase4').disabled = noTarget;
     document.getElementById('btnClean').disabled = running || noTarget;
     // Stop All 按钮：有正在跑的进程才显示
     // 根据运行状态更新 Phase 3 按钮和提示
     const hasRunning = d.running;
     document.getElementById('btnStopAll').style.display = hasRunning ? 'inline-block' : 'none';
+    // 常驻按钮，不做显示隐藏
     const tt = document.querySelector('.tooltip-wrap .tooltip-text');
     if (tt) {
       tt.style.display = noTarget ? 'none' : '';
@@ -481,6 +566,14 @@ async function startPipeline(phase) {
   if (r && r.status === 'started') {
     status.textContent = `Phase ${phase} running on ${target}`;
     status.style.color = '#1a7f37';
+    // 立即刷新右上角 badge 为 Running
+    document.getElementById('globalStatus').innerHTML = '<span class="badge badge-green"><span class="status-dot green pulsing"></span>Running</span>';
+    setTimeout(updateDashboard, 200);
+
+    // Phase 4 (普通模式): 标记以便完成时通知
+    if (phase === 4 && !document.getElementById('easyfuzzToggle').checked) {
+      _phase4Running = true;
+    }
   } else {
     const msg = r && r.error ? r.error : 'Failed to start';
     status.textContent = msg;
@@ -550,11 +643,16 @@ async function cleanWorkspace() {
     window._selectedNames = [];
     window._selectedRef = '';
     document.querySelectorAll('.strategy-cb').forEach(cb => cb.checked = false);
-    _fullFuzzStarted = false;
-    document.getElementById('fullFuzzNotify').style.display = 'none';
+    // 清除本地状态
+    _notifKeys = new Set();
+    _phase4Running = false;
+    _efCards = {};
+    document.getElementById('efCardContainer').innerHTML = '';
+    try { localStorage.removeItem('af_dismissed'); } catch(e) {}
     // 强制刷新界面
     loadManifest();
     updateDashboard();
+    if (document.getElementById('easyfuzzToggle').checked) loadEasyFuzzCommands();
   } else {
     status.textContent = r && r.error ? r.error : 'Failed to clean';
     status.style.color = '#cf222e';
@@ -683,27 +781,33 @@ function updateEasyFuzzUI(enabled) {
   const cls4 = document.getElementById('clsPhase4');
   const fullGroup = document.getElementById('fullEasyFuzzGroup');
   const gear = document.getElementById('btnFullEasyFuzzSettings');
+  const efSummaryGroup = document.getElementById('easyFuzzSummaryGroup');
   if (enabled) {
     btn1.textContent = 'Phase 1: Easy-Fuzz';
     btn2.textContent = 'Phase 2: Issues';
     btn3.style.display = 'none';
+    if (cls3) cls3.style.display = 'none';
     btn4.style.display = 'none';
     btn5.style.display = 'none';
-    if (cls3) cls3.style.display = 'none';
     if (cls4) cls4.style.display = 'none';
     if (fullGroup) fullGroup.style.display = '';
+    if (efSummaryGroup) efSummaryGroup.style.display = '';
     if (gear) gear.style.display = 'block';
     document.getElementById('selectAllLabel') && (document.getElementById('selectAllLabel').style.display = 'none');
     document.getElementById('strategiesStartSection') && (document.getElementById('strategiesStartSection').style.display = 'none');
   } else {
     btn1.textContent = 'Phase 1: Analyze';
     btn2.textContent = 'Phase 2: Prep';
+    btn3.textContent = 'Phase 3: Fuzz';
     btn3.style.display = '';
+    btn3.onclick = function() { startPipeline(3); };
+    if (btn3.nextElementSibling) btn3.nextElementSibling.textContent = '启动 fuzz 策略';
     btn4.style.display = '';
     btn5.style.display = '';
     if (cls3) cls3.style.display = '';
     if (cls4) cls4.style.display = '';
     if (fullGroup) fullGroup.style.display = 'none';
+    if (efSummaryGroup) efSummaryGroup.style.display = 'none';
     if (gear) gear.style.display = 'none';
     document.getElementById('selectAllLabel') && (document.getElementById('selectAllLabel').style.display = '');
     document.getElementById('strategiesStartSection') && (document.getElementById('strategiesStartSection').style.display = '');
@@ -729,12 +833,10 @@ async function loadEasyFuzzCommands() {
   }
 
   list.innerHTML = d.commands.map(function(c, idx) {
-    const crashInfo = c.crashes_found !== undefined ? 'crashes: ' + c.crashes_found : '';
     return '<div style="background:#fefcf8;border:1px solid #d0d7de;border-radius:6px;padding:10px 14px;">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
         '<strong style="font-size:13px;">#' + (idx+1) + ' ' + (c.name || 'strategy_' + c.id) + '</strong>' +
         (c.description ? '<span style="font-size:11px;color:#656d76;">— ' + c.description + '</span>' : '') +
-        (crashInfo ? '<span style="font-size:11px;color:#cf222e;margin-left:auto;">' + crashInfo + '</span>' : '') +
       '</div>' +
       '<div style="font-family:\'Cascadia Code\',\'JetBrains Mono\',Consolas,monospace;font-size:11px;color:#24292f;background:#faf5ed;padding:6px 10px;border-radius:4px;white-space:pre-wrap;word-break:break-all;line-height:1.4;">' + (c.command || c.cmd || 'N/A') + '</div>' +
     '</div>';
@@ -831,10 +933,182 @@ async function reRunEasyFuzzCommand() {
 }
 
 // ──────────────────────────────────────────────
-// Full EasyFuzz Pipeline Functions
+// Issue Submission Functions
 // ──────────────────────────────────────────────
 
-let _fullFuzzStarted = false;
+async function loadIssueFiles() {
+  const target = document.getElementById('targetSelect').value;
+  const select = document.getElementById('issueFileSelect');
+  if (!target) {
+    select.innerHTML = '<option value="">-- Select target first --</option>';
+    return;
+  }
+  const d = await api('/api/issues/list?target=' + encodeURIComponent(target));
+  select.innerHTML = '<option value="">-- Select issue file --</option>';
+  if (d && d.files && d.files.length) {
+    d.files.forEach(function(f) {
+      const opt = document.createElement('option');
+      opt.value = f; opt.textContent = f;
+      select.appendChild(opt);
+    });
+  } else {
+    select.innerHTML = '<option value="">-- No issue files found --</option>';
+  }
+  document.getElementById('issueEditor').value = '';
+}
+
+async function onIssueFileSelect() {
+  const target = document.getElementById('targetSelect').value;
+  const file = document.getElementById('issueFileSelect').value;
+  const editor = document.getElementById('issueEditor');
+  if (!target || !file) {
+    editor.value = '';
+    editor.readOnly = true;
+    return;
+  }
+  const d = await api('/api/issues/content?target=' + encodeURIComponent(target) + '&file=' + encodeURIComponent(file));
+  if (d && d.content) {
+    editor.value = d.content;
+    editor.readOnly = false;
+  } else {
+    editor.value = '// Failed to load content';
+    editor.readOnly = true;
+  }
+}
+
+async function copyIssueText() {
+  const editor = document.getElementById('issueEditor');
+  const status = document.getElementById('issueCopyStatus');
+  if (!editor.value) return;
+  try {
+    await navigator.clipboard.writeText(editor.value);
+    status.style.display = 'inline';
+    setTimeout(function() { status.style.display = 'none'; }, 2000);
+  } catch (e) {
+    editor.select();
+    document.execCommand('copy');
+    status.style.display = 'inline';
+    setTimeout(function() { status.style.display = 'none'; }, 2000);
+  }
+}
+
+async function loadRepoUrl() {
+  const target = document.getElementById('targetSelect').value;
+  if (!target) return;
+  const d = await api('/api/issues/repo-url?target=' + encodeURIComponent(target));
+  if (d && d.repo_url) {
+    _cachedRepoUrl = d.repo_url;
+    return;
+  }
+  const detected = await api('/api/issues/detect-repo-url?target=' + encodeURIComponent(target));
+  if (detected && detected.repo_url) {
+    _cachedRepoUrl = detected.repo_url;
+    await api('/api/issues/repo-url?target=' + encodeURIComponent(target), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({repo_url: detected.repo_url})
+    });
+  }
+}
+
+let _cachedRepoUrl = '';
+
+function getRepoUrl() {
+  return _cachedRepoUrl.replace(/\/+$/, '');
+}
+
+async function loadGitHubIssues() {
+  const target = document.getElementById('targetSelect').value;
+  const container = document.getElementById('issuesListContainer');
+  const placeholder = document.getElementById('issuesListPlaceholder');
+  if (!target) return;
+
+  await loadRepoUrl();
+  const baseUrl = getRepoUrl();
+  if (baseUrl) {
+    placeholder.style.display = 'none';
+    container.innerHTML = '<div class="issue-loading"><span class="status-dot green pulsing"></span> Loading issues...</div>';
+
+    const d = await api('/api/issues/github-list?target=' + encodeURIComponent(target));
+    container.innerHTML = '';
+
+    if (d && d.issues && d.issues.length) {
+      document.getElementById('issuesRepoLabel').textContent = d.repo || baseUrl.replace(/https?:\/\/github\.com\//, '');
+      d.issues.forEach(function(issue) {
+        var el = document.createElement('div');
+        el.className = 'issue-item';
+        el.onclick = function() { window.open(issue.url, '_blank'); };
+        var created = issue.created_at ? new Date(issue.created_at).toLocaleDateString() : '';
+        el.innerHTML =
+          '<span class="issue-state ' + (issue.state === 'open' ? 'open' : 'closed') + '"></span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div class="issue-title">' + escHtml(issue.title) + '</div>' +
+            '<div class="issue-meta">#' + issue.number + ' ' + issue.state + ' \u00b7 ' + created + '</div>' +
+          '</div>' +
+          '<span class="issue-comments">' +
+            (issue.comments > 0
+              ? '<svg width="14" height="14" viewBox="0 0 16 16" fill="#656d76" style="vertical-align:middle;margin-right:2px;"><path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.573 2.573A1.458 1.458 0 014 13.543V12H2.75A1.75 1.75 0 011 10.25z"/></svg>'
+              : '') +
+            (issue.comments > 0 ? issue.comments : '') +
+          '</span>';
+        container.appendChild(el);
+      });
+    } else if (d && d.error) {
+      container.innerHTML = '<div class="issue-error">API error: ' + escHtml(d.error) + '</div>';
+    } else {
+      container.innerHTML = '<div class="issue-error">No issues found or API rate limited.</div>';
+    }
+  } else {
+    placeholder.style.display = 'flex';
+    container.innerHTML = '';
+    container.appendChild(placeholder);
+  }
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function saveRepoUrl() {
+  const target = document.getElementById('targetSelect').value;
+  const url = _cachedRepoUrl;
+  if (!target) return;
+  await api('/api/issues/repo-url?target=' + encodeURIComponent(target), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({repo_url: url})
+  });
+}
+
+
+
+function openGitHubIssue() {
+  copyIssueText();
+  doOpenGitHub('issues/new');
+}
+
+function openGitHubIssues() {
+  doOpenGitHub('issues');
+}
+
+function openGitHubNewIssue() {
+  doOpenGitHub('issues/new');
+}
+
+function doOpenGitHub(path) {
+  const base = getRepoUrl();
+  if (!base) {
+    alert('Please configure the GitHub Repo URL first.');
+    return;
+  }
+  window.open(base + '/' + path, '_blank');
+}
+
+// ──────────────────────────────────────────────
+// Full EasyFuzz Pipeline Functions
 
 async function startFullEasyFuzz() {
   const target = document.getElementById('targetSelect').value;
@@ -865,8 +1139,8 @@ async function startFullEasyFuzz() {
     _fullFuzzStarted = true;
     status.textContent = 'Full pipeline running — fuzzing for ' + cfg.duration_min + 'min...';
     status.style.color = '#1a7f37';
-    // Clear old notification
-    document.getElementById('fullFuzzNotify').style.display = 'none';
+    // 立即刷新右上角 badge 为 Running
+    document.getElementById('globalStatus').innerHTML = '<span class="badge badge-green"><span class="status-dot green pulsing"></span>Running</span>';
   } else {
     status.textContent = r && r.error ? r.error : 'Failed to start';
     status.style.color = '#cf222e';
@@ -901,63 +1175,39 @@ async function saveFullFuzzConfig() {
   }
 }
 
-async function checkFullEasyFuzzResult() {
+// 检测 easy-fuzz / full-pipeline fuzz 完成 → 通知（全局扫描，不依赖当前选中的项目）
+async function checkFuzzCompletion() {
+  const r = await api('/api/easyfuzz/full-result');
+  if (!r || !r.has_result || !r.results) return;
+  for (var i = 0; i < r.results.length; i++) {
+    var item = r.results[i];
+    var proj = item.project || '?';
+    var dur = item.duration_min || 0;
+    var timeStr = dur >= 60 ? Math.floor(dur/60)+'h '+dur%60+'m' : Math.round(dur)+'m';
+    addNotification('fuzz-done', proj + ' Fuzzing Complete',
+      proj + ' fuzz 了 ' + timeStr + '，发现了 <strong>' + (item.crashes||0) + '</strong> 个 crash',
+      proj);  // keySuffix = project name, 保证每个项目最多一条
+  }
+}
+
+// 普通模式 Phase 4 完成通知
+async function checkPhase4Completion() {
+  if (!_phase4Running) return;
   const target = document.getElementById('targetSelect').value;
-  if (!target || !_fullFuzzStarted) return;
-
-  // Check if pipeline is still running
-  const statusData = await api('/api/status?target=' + encodeURIComponent(target));
-  if (!statusData) return;
-
-  // Pipeline just finished (was running, now not)
-  if (statusData.pipeline_running) return; // still running
-
-  // Pipeline finished — check for result (with retry in case file not written yet)
-  for (let i = 0; i < 5; i++) {
-    const result = await api('/api/easyfuzz/full-result?target=' + encodeURIComponent(target));
-    if (result && result.has_result) {
-      _fullFuzzStarted = false;
-      showFullEasyFuzzNotification(result);
-      return;
-    }
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  // No result found — likely not a full easyfuzz pipeline that just finished
-  _fullFuzzStarted = false;
+  if (!target) return;
+  const s = await api('/api/status?target=' + encodeURIComponent(target));
+  if (!s || s.pipeline_running) return;
+  _phase4Running = false;
+  addNotification('phase4-done', 'Phase 4 Complete',
+    target + ' Phase 4 运行完成', target);
 }
 
-function showFullEasyFuzzNotification(result) {
-  const notify = document.getElementById('fullFuzzNotify');
-  const content = document.getElementById('fullFuzzNotifyContent');
-  const durationMin = result.duration_min || 0;
-  const crashes = result.crashes || 0;
-  const project = result.project || '';
-
-  let timeStr = '';
-  if (durationMin >= 60) {
-    const h = Math.floor(durationMin / 60);
-    const m = Math.round(durationMin % 60);
-    timeStr = h + '\u5c0f\u65f6' + (m > 0 ? m + '\u5206\u949f' : '');
-  } else {
-    timeStr = Math.round(durationMin) + '\u5206\u949f';
-  }
-
-  content.innerHTML = '\u2705 <strong>' + project + '</strong> \u9879\u76ee fuzz \u4e86' +
-    timeStr + '\uff0c\u53d1\u73b0\u4e86 <strong>' + crashes + '</strong> \u4e2a crash';
-
-  notify.style.display = 'block';
-
-  // Click to dismiss
-  notify.onclick = function() {
-    notify.style.display = 'none';
-  };
-}
-
-// Patch updateDashboard to check full easyfuzz result
+// Patch updateDashboard to check both fuzz completion and phase 4 completion
 const _origUpdateDashboard = updateDashboard;
 updateDashboard = function() {
   _origUpdateDashboard();
-  checkFullEasyFuzzResult();
+  checkFuzzCompletion();
+  checkPhase4Completion();
 };
 
 // Patch updateDashboard to handle EasyFuzz mode
@@ -980,6 +1230,13 @@ document.addEventListener('DOMContentLoaded', () => {
     loadManifest();
     updateDashboard();
     loadRefContext();
+    // Load issue data when target changes
+    loadIssueFiles();
+    loadGitHubIssues();
+    // If EasyFuzz enabled, reload commands for the new project
+    if (document.getElementById('easyfuzzToggle').checked) {
+      loadEasyFuzzCommands();
+    }
     // If on report page, reload summary
     const reportPage = document.querySelector('.page[data-page="report"]');
     if (reportPage && reportPage.classList.contains('active')) {

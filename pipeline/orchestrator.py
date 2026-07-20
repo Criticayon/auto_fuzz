@@ -318,6 +318,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
     container: ContainerManager | None = None
     FUZZ_CONT = f"/workspace/fuzz_{project_name}"  # 正常模式容器路径
     EASY_CONT = f"/workspace/easy_fuzz_{project_name}"  # EasyFuzz 容器路径（与正常模式隔离）
+    TMP_CONT = f"{EASY_CONT}/tmp"  # EasyFuzz 中间产物目录
 
     t_start = time.time()
     if easyfuzz:
@@ -364,8 +365,8 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                     f"Project source (container): {container_target}\n"
                     f"Fuzz workspace (container): {EASY_CONT}\n"
                     f"Save all output files to {work_dir}.\n"
-                    f"IMPORTANT: Do builds (cmake, make) inside the project source dir {container_target}/.\n"
-                    f"Only fuzz output dirs (out_*), seeds, and easy_fuzz_commands.json go under {EASY_CONT}/.\n"
+                    f"All generated/intermediate files (build outputs, temp files, target output) MUST go under {TMP_CONT}/.\n"
+                    f"Do NOT create any files or directories directly under /workspace/.\n"
                     f"Use container_exec for all compilation and fuzzing.\n"
                     f"Do NOT create build scripts on the host.\n"
                     f"CRITICAL: Do NOT delete, stop, restart, or modify the AFL++ container itself. "
@@ -388,6 +389,7 @@ async def run_pipeline(target: str, work_dir: str, start_phase: int = 1, end_pha
                 prompt = (
                     f"Run the crash-reporter skill, then the issue-generator skill.\n"
                     f"Fuzz workspace (container): {EASY_CONT}\n"
+                    f"Temp directory for intermediate files: {TMP_CONT}\n"
                     f"Project source (container): /workspace/{project_name}\n"
                     f"Host workdir: {work_dir}\n"
                     f"Use container_exec for crash reproduction in the container.\n"

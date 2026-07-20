@@ -282,6 +282,15 @@ Run:
 
 See attached file: `crashes/<crash_type>/poc`
 
+If the crash directory contains additional input files (e.g. `config.xml`, `dict.txt`), list them as well — these are required for proper reproduction:
+
+```
+crashes/<crash_type>/
+├── poc
+├── config.xml    (additional input file)
+└── ...
+```
+
 ---
 
 ## ASAN Report

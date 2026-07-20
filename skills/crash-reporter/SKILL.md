@@ -24,22 +24,39 @@ source target_metadata.sh
 echo "PROJ=$PROJ BUILD_DIR=$BUILD_DIR COMMIT_HASH=$COMMIT_HASH PROG_VERSION=$PROG_VERSION"
 ```
 
-### Step 2: Sync to latest commit
+### Step 2: Sync to latest commit via host
 
-Before reproducing crashes, ensure the source code is at the latest upstream commit. A crash that was already fixed in a newer commit is not a valid vulnerability:
+Before reproducing crashes, ensure the source code is at the latest upstream commit. A crash that was already fixed in a newer commit is not a valid vulnerability.
+
+The **host** handles git operations because the container may not have proxy access:
 
 ```bash
-cd $PROJ
-git fetch origin
-LATEST=$(git rev-parse origin/HEAD)
-CURRENT=$(git rev-parse HEAD)
-if [ "$CURRENT" != "$LATEST" ]; then
-  echo "Current commit $CURRENT is behind latest $LATEST, pulling..."
-  git pull --rebase origin HEAD
+# Step 2a: Git pull on HOST (use Bash tool, not container_exec)
+# HOST_PROJECT is the original target path passed to the pipeline
+HOST_PROJECT="<target_project_path>"
+cd "$HOST_PROJECT"
+git pull --ff-only 2>/dev/null || git pull 2>/dev/null || echo "[warn] git pull failed"
+LATEST_HOST=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+echo "Host latest commit: $LATEST_HOST"
+```
+
+```bash
+# Step 2b: Check container version and sync if needed
+# Use container_exec to check the container's current commit
+container_commit=$(container_exec command="cd $PROJ && git rev-parse HEAD 2>/dev/null || echo 'N/A'" workdir="/workspace/fuzz_<project>")
+
+if [ "$container_commit" != "$LATEST_HOST" ]; then
+  echo "Container ($container_commit) != Host ($LATEST_HOST), syncing source..."
+  # Copy host source to container (overwrite)
+  container_exec command="rm -rf $PROJ && mkdir -p $PROJ" workdir="/tmp"
+  # Use docker cp from the host to transfer files
+  docker cp "$HOST_PROJECT/." "${CONTAINER_NAME}:${PROJ}/"
+  echo "Source synced to container at $PROJ"
+
   # 源码变了，旧的 ASAN binary 必须重建
-  rm -rf build_asan 2>/dev/null
+  echo "Source changed, ASAN binary must be rebuilt"
 else
-  echo "Already at latest commit $CURRENT"
+  echo "Container is up-to-date at $container_commit"
 fi
 ```
 
@@ -187,7 +204,14 @@ echo "[VERIFY] Ensure total_processed == total_collected from Phase 1"
 
 ## Phase 3: Analyze & Save Unique Crashes to Host
 
-对 Phase 2 去重后的每个唯一 crash，获取完整的 ASAN 输出。然后在宿主机创建对应目录。crash 计数保存在每个目录下的 `crash_count.txt`：
+对 Phase 2 去重后的每个唯一 crash，获取完整的 ASAN 输出。然后在宿主机创建对应目录。crash 计数保存在每个目录下的 `crash_count.txt`。
+
+**额外输入文件处理**：某些目标程序在复现时需要多个输入文件（如 `./binary -c config.xml -d dict.txt input_file`）。在保存每个 crash 时：
+1. 查看该 crash 对应策略的完整命令（从 `easy_fuzz_commands.json` 或上下文获取），确定 binary 的参数中哪些是文件路径
+2. 将这些文件连同 poc 一起复制到 crash 目录
+3. 生成 reproduce.sh 时使用正确的 flags 和本地文件名
+
+基本脚本框架：
 
 ```bash
 for crash in crashes_dedup/*; do
@@ -213,28 +237,42 @@ for crash in crashes_dedup/*; do
   cp "$crash" "crashes/$dir_slug/poc"
   echo "$crash_count" > "crashes/$dir_slug/crash_count.txt"
 
-  # 写入 reproduce.sh
+  # ─── 写入 reproduce.sh ───
+  # 确定正确的复现命令：
+  #   - 如果只需单个文件输入：/path/to/binary @@ < poc
+  #   - 如果需要 flags + 多个文件：/path/to/binary -c config.xml -d dict.txt poc
+  #
+  # 如果是多文件场景，需先将额外的文件 cp 到 crashes/$dir_slug/ 目录下，
+  # 然后 reproduce.sh 中引用本地文件名。
+  #
+  # 写入 reproduce.sh（请将 /path/to/binary 替换为实际 binary 路径）：
   cat > "crashes/$dir_slug/reproduce.sh" << SCRIPT
 #!/bin/bash
-/path/to/binary @@ < poc
+# Replace with the actual binary path and flags
+/path/to/binary [FLAGS] poc
 SCRIPT
   chmod +x "crashes/$dir_slug/reproduce.sh"
 done
 ```
 
-**Directory structure on host:**
+> **Important**: The `/path/to/binary` placeholder and `[FLAGS]` must be replaced with the actual binary path and flags determined from the original fuzz command. If there were additional input files (config, dictionary, etc.), copy them to `crashes/<type>/` and reference them in `reproduce.sh` by their local filenames.
+
+示例：如果原命令是 `afl-fuzz -i seeds -o out -- ./xmlstarlet -c config.xml @@`，则 crash 的复现目录应为：
 
 ```
 crashes/
-├── heap_buffer_overflow/
-│   ├── poc              # The PoC file
-│   ├── crash_count.txt  # Raw crash instance count (e.g. "42")
-│   └── reproduce.sh     # Reproduction command
-├── use_after_free/
-│   ├── poc
-│   ├── crash_count.txt
-│   └── reproduce.sh
-└── ...
+└── heap_buffer_overflow/
+    ├── poc              # Crash-triggering input
+    ├── config.xml       # Additional input file (saved alongside poc)
+    ├── crash_count.txt  # Raw crash instance count
+    └── reproduce.sh     # ./xmlstarlet -c config.xml poc
+```
+
+```bash
+cat > "crashes/heap_buffer_overflow/reproduce.sh" << 'SCRIPT'
+#!/bin/bash
+/path/to/xmlstarlet -c config.xml poc
+SCRIPT
 ```
 
 The `reproduce.sh` should contain the exact command that reproduces the crash, for example:
