@@ -270,6 +270,8 @@
             <button class="issues-btn" id="btnRefreshIssues" onclick="loadGitHubIssues()" title="Refresh issues list">&#x1F504;</button>
             <button class="issues-btn" onclick="openGitHubIssues()" title="Open issues page on GitHub">&#128279; Open</button>
             <button class="issues-btn" onclick="openGitHubNewIssue()" title="Create new issue on GitHub">&#43; New</button>
+            <button class="issues-btn" id="btnCheckDup" onclick="checkDuplicate()" title="Check if current issue text duplicates an existing issue">&#128269; Check Duplicate</button>
+            <span id="issueDupStatus" style="font-size:12px;display:none;"></span>
           </div>
           <div id="issuesListContainer" class="issues-list-container">
             <div id="issuesListPlaceholder" class="issues-frame-placeholder">

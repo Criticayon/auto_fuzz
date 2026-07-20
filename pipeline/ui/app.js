@@ -976,6 +976,42 @@ async function onIssueFileSelect() {
   }
 }
 
+async function checkDuplicate() {
+  const target = document.getElementById('targetSelect').value;
+  const editor = document.getElementById('issueEditor');
+  const btn = document.getElementById('btnCheckDup');
+
+  if (!target) { alert('Please select a target first.'); return; }
+  if (!editor.value.trim()) { alert('Issue editor is empty.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+
+  const d = await api('/api/issues/check-duplicate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({target: target, issue_content: editor.value})
+  });
+
+  btn.disabled = false;
+  btn.textContent = '\uD83D\uDD0D Check Duplicate';
+
+  if (d && d.duplicate) {
+    const baseUrl = getRepoUrl();
+    const link = baseUrl
+      ? '<a href="' + baseUrl + '/issues/' + d.issue_number + '" target="_blank" style="color:#fbbf24;font-weight:700;text-decoration:underline;">#' + d.issue_number + '</a>'
+      : '#' + d.issue_number;
+    addNotification('fuzz-done', 'Potential Duplicate Found',
+      link + (d.issue_title ? ' &mdash; ' + escHtml(d.issue_title) : '') + '<br><span style="font-size:11px;opacity:0.7;">' + target + '</span>');
+  } else if (d && !d.duplicate && !d.error) {
+    addNotification('phase4-done', 'No Duplicate Found',
+      'This issue appears to be unique for <strong>' + target + '</strong>.');
+  } else {
+    addNotification('stale', 'Duplicate Check Failed',
+      (d ? d.error : 'Request failed') + ' &mdash; <strong>' + target + '</strong>');
+  }
+}
+
 async function copyIssueText() {
   const editor = document.getElementById('issueEditor');
   const status = document.getElementById('issueCopyStatus');
@@ -1021,19 +1057,32 @@ async function loadGitHubIssues() {
   const target = document.getElementById('targetSelect').value;
   const container = document.getElementById('issuesListContainer');
   const placeholder = document.getElementById('issuesListPlaceholder');
-  if (!target) return;
+  const repoLabel = document.getElementById('issuesRepoLabel');
+  // Always clear repo label when loading — avoids stale project name
+  if (repoLabel) repoLabel.textContent = '';
+  if (!container) return;
+  if (!target) {
+    _cachedRepoUrl = '';
+    container.innerHTML = '';
+    if (placeholder) container.appendChild(placeholder);
+    return;
+  }
+
+  // 清除旧数据，避免切换到新项目时还显示旧的 issue
+  _cachedRepoUrl = '';
+  container.innerHTML = '<div class="issue-loading"><span class="status-dot green pulsing"></span> Loading issues...</div>';
 
   await loadRepoUrl();
   const baseUrl = getRepoUrl();
   if (baseUrl) {
-    placeholder.style.display = 'none';
+    if (placeholder) placeholder.style.display = 'none';
     container.innerHTML = '<div class="issue-loading"><span class="status-dot green pulsing"></span> Loading issues...</div>';
 
     const d = await api('/api/issues/github-list?target=' + encodeURIComponent(target));
     container.innerHTML = '';
 
     if (d && d.issues && d.issues.length) {
-      document.getElementById('issuesRepoLabel').textContent = d.repo || baseUrl.replace(/https?:\/\/github\.com\//, '');
+      if (repoLabel) repoLabel.textContent = d.repo || baseUrl.replace(/https?:\/\/github\.com\//, '');
       d.issues.forEach(function(issue) {
         var el = document.createElement('div');
         el.className = 'issue-item';

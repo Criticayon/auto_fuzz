@@ -12,7 +12,7 @@ from pathlib import Path
 import docker
 from docker.errors import NotFound
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
 STOP_SIGNAL = ".stop_signal"
@@ -23,6 +23,14 @@ app = FastAPI(title="Auto-Fuzz Control Center")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONTAINER_NAME = "afl"
+
+
+@app.middleware("http")
+async def add_cache_control(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 _pipeline_proc: subprocess.Popen | None = None
 _current_target: str | None = None
@@ -880,6 +888,127 @@ async def api_issues_github_list(target: str = ""):
         return {"issues": issues, "repo": repo_path}
     except Exception as e:
         return {"issues": [], "error": str(e)}
+
+
+@app.post("/api/issues/check-duplicate")
+async def api_issues_check_duplicate(request: Request):
+    """Check if issue text is a duplicate of existing GitHub issues using Claude Code."""
+    body = await request.json()
+    target = body.get("target", "")
+    issue_content = body.get("issue_content", "")
+
+    if not target:
+        return {"duplicate": False, "error": "no target"}
+    if not issue_content:
+        return {"duplicate": False, "error": "no issue content"}
+
+    # Resolve owner/repo from git remote
+    proj_dir = BASE_DIR.parent / target
+    if not proj_dir.exists():
+        return {"duplicate": False, "error": "project not found"}
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(proj_dir), capture_output=True, text=True, timeout=5,
+        )
+        url = result.stdout.strip()
+        if not url:
+            return {"duplicate": False, "error": "no git remote"}
+        if url.startswith("git@"):
+            repo_path = url.split(":")[-1]
+        elif "github.com" in url:
+            repo_path = url.split("github.com/")[-1]
+        else:
+            return {"duplicate": False, "error": "not a GitHub repo"}
+        repo_path = repo_path.replace(".git", "")
+    except Exception as e:
+        return {"duplicate": False, "error": str(e)}
+
+    # Get HEAD commit timestamp to filter relevant issues
+    commit_since = ""
+    try:
+        log_result = subprocess.run(
+            ["git", "log", "-1", "--format=%cI"],
+            cwd=str(proj_dir), capture_output=True, text=True, timeout=5,
+        )
+        commit_since = log_result.stdout.strip()
+    except Exception:
+        pass
+
+    # Fetch open GitHub issues created after the commit timestamp
+    try:
+        api_url = f"https://api.github.com/repos/{repo_path}/issues?state=open&per_page=50&sort=created"
+        if commit_since:
+            api_url += f"&since={commit_since}"
+        curl_result = subprocess.run(
+            ["curl", "-s", "--connect-timeout", "5", "--max-time", "10",
+             "-w", "\n%{http_code}",
+             "-H", "User-Agent: auto-fuzz/1.0", api_url],
+            capture_output=True, timeout=15,
+        )
+        raw = curl_result.stdout.decode("utf-8", errors="replace")
+        lines = raw.strip().split("\n")
+        http_code = lines[-1].strip() if lines else "000"
+        body_resp = "\n".join(lines[:-1]) if len(lines) > 1 else ""
+        if http_code != "200":
+            return {"duplicate": False, "error": f"GitHub API HTTP {http_code}"}
+        issues = json.loads(body_resp) if body_resp else []
+    except Exception as e:
+        return {"duplicate": False, "error": f"failed to fetch issues: {e}"}
+
+    if not issues:
+        return {"duplicate": False, "error": "no open issues found"}
+
+    # Build context for Claude comparison
+    recent = []
+    for issue in issues[:15]:
+        title = issue.get("title", "")
+        num = issue.get("number", 0)
+        body_text = issue.get("body", "") or ""
+        summary = body_text[:500].replace("\n", " ")
+        recent.append(f"#{num}: {title}\n  {summary}")
+
+    recent_text = "\n\n".join(recent)
+
+    prompt = (
+        f"Compare the following NEW issue content against the RECENT GitHub issues provided.\n"
+        f"Determine if the new issue is a semantic duplicate of any existing issue.\n"
+        f"If it IS a duplicate, respond with exactly: DUPLICATE:#<number>\n"
+        f"If it is NOT a duplicate, respond with exactly: NO_DUPLICATE\n\n"
+        f"--- RECENT ISSUES ---\n{recent_text}\n\n"
+        f"--- NEW ISSUE ---\n{issue_content}"
+    )
+
+    # Call Claude Code CLI
+    try:
+        claude_proc = subprocess.run(
+            ["claude", "-p", prompt],
+            capture_output=True, text=True, timeout=60,
+        )
+        claude_out = claude_proc.stdout.strip()
+    except Exception as e:
+        return {"duplicate": False, "error": f"Claude call failed: {e}"}
+
+    if claude_out.startswith("DUPLICATE:"):
+        try:
+            num_str = claude_out.split("DUPLICATE:#", 1)[1].strip()
+            issue_number = int(num_str)
+            # Find matching issue title
+            matched_title = ""
+            for issue in issues:
+                if issue.get("number") == issue_number:
+                    matched_title = issue.get("title", "")
+                    break
+            return {
+                "duplicate": True,
+                "issue_number": issue_number,
+                "issue_title": matched_title,
+                "repo": repo_path,
+            }
+        except (ValueError, IndexError):
+            return {"duplicate": False, "error": f"unexpected Claude response: {claude_out}"}
+    else:
+        return {"duplicate": False}
 
 
 @app.get("/api/issues/detect-repo-url")
