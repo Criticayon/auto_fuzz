@@ -996,19 +996,34 @@ async function checkDuplicate() {
   btn.disabled = false;
   btn.textContent = '\uD83D\uDD0D Check Duplicate';
 
+  function fmtMeta(d) {
+    var parts = [];
+    if (d.commit_since) parts.push('Commit: ' + d.commit_since.replace('T', ' ').replace(/\.\d+[+-].+$/, ''));
+    if (d.issues_checked) parts.push('Checked: ' + d.issues_checked + ' issues');
+    return parts.length ? '<span style="font-size:11px;opacity:0.7;display:block;margin:4px 0 2px 0;">' + parts.join(' &middot; ') + '</span>' : '';
+  }
+
   if (d && d.duplicate) {
     const baseUrl = getRepoUrl();
     const link = baseUrl
       ? '<a href="' + baseUrl + '/issues/' + d.issue_number + '" target="_blank" style="color:#fbbf24;font-weight:700;text-decoration:underline;">#' + d.issue_number + '</a>'
       : '#' + d.issue_number;
     addNotification('fuzz-done', 'Potential Duplicate Found',
-      link + (d.issue_title ? ' &mdash; ' + escHtml(d.issue_title) : '') + '<br><span style="font-size:11px;opacity:0.7;">' + target + '</span>');
+      link + (d.issue_title ? ' &mdash; ' + escHtml(d.issue_title) : '') +
+      fmtMeta(d) +
+      (d.reason ? '<span style="font-size:12px;display:block;margin-top:4px;">' + escHtml(d.reason) + '</span>' : '') +
+      '<br><span style="font-size:11px;opacity:0.7;">' + target + '</span>',
+      'checkdup-' + target + '-' + Date.now());
   } else if (d && !d.duplicate && !d.error) {
     addNotification('phase4-done', 'No Duplicate Found',
-      'This issue appears to be unique for <strong>' + target + '</strong>.');
+      'This issue appears to be unique for <strong>' + target + '</strong>.' +
+      fmtMeta(d) +
+      (d.reason ? '<br><span style="font-size:12px;display:block;margin-top:4px;">' + escHtml(d.reason) + '</span>' : ''),
+      'checkdup-' + target + '-' + Date.now());
   } else {
     addNotification('stale', 'Duplicate Check Failed',
-      (d ? d.error : 'Request failed') + ' &mdash; <strong>' + target + '</strong>');
+      (d ? d.error : 'Request failed') + ' &mdash; <strong>' + target + '</strong>',
+      'checkdup-' + target + '-' + Date.now());
   }
 }
 

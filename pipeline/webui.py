@@ -968,30 +968,54 @@ async def api_issues_check_duplicate(request: Request):
         summary = body_text[:500].replace("\n", " ")
         recent.append(f"#{num}: {title}\n  {summary}")
 
-    recent_text = "\n\n".join(recent)
-
+    issues_checked = len(recent)
     prompt = (
-        f"Compare the following NEW issue content against the RECENT GitHub issues provided.\n"
-        f"Determine if the new issue is a semantic duplicate of any existing issue.\n"
-        f"If it IS a duplicate, respond with exactly: DUPLICATE:#<number>\n"
-        f"If it is NOT a duplicate, respond with exactly: NO_DUPLICATE\n\n"
-        f"--- RECENT ISSUES ---\n{recent_text}\n\n"
-        f"--- NEW ISSUE ---\n{issue_content}"
+        f"请将下面的新 Issue 内容与提供的 {issues_checked} 个已有 GitHub Issue 进行语义对比。\n"
+        f"判断新 Issue 是否与某个已有 Issue 重复。\n"
+        f"如果是重复，请严格按以下格式回复：\n"
+        f"DUPLICATE:#<number>\n"
+        f"REASON:<用2-3句中文说明为什么重复>\n"
+        f"如果不是重复，请严格按以下格式回复：\n"
+        f"NO_DUPLICATE\n"
+        f"REASON:<用2-3句中文说明为什么是新的>\n\n"
+        f"--- 已有 ISSUES ---\n{recent_text}\n\n"
+        f"--- 新 ISSUE ---\n{issue_content}"
     )
 
-    # Call Claude Code CLI
+    # Use Claude Agent SDK for semantic comparison
+    from claude_agent_sdk import query as claude_query
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        AssistantMessage,
+        ResultMessage,
+        TextBlock,
+    )
+
+    options = ClaudeAgentOptions(allowed_tools=[], permission_mode="bypassPermissions")
+    claude_out = ""
     try:
-        claude_proc = subprocess.run(
-            ["claude", "-p", prompt],
-            capture_output=True, text=True, timeout=60,
-        )
-        claude_out = claude_proc.stdout.strip()
+        async for msg in claude_query(prompt=prompt, options=options):
+            if isinstance(msg, ResultMessage) and msg.subtype == "success":
+                claude_out = msg.result.strip()
+                break
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        claude_out = block.text.strip()
     except Exception as e:
         return {"duplicate": False, "error": f"Claude call failed: {e}"}
 
+    # Parse response: extract reason from second line
+    reason = ""
+    lines = claude_out.split("\n")
+    for line in lines:
+        if line.startswith("REASON:"):
+            reason = line[len("REASON:"):].strip()
+            break
+
     if claude_out.startswith("DUPLICATE:"):
         try:
-            num_str = claude_out.split("DUPLICATE:#", 1)[1].strip()
+            num_str = claude_out.split("DUPLICATE:#", 1)[1].split("\n")[0].strip()
             issue_number = int(num_str)
             # Find matching issue title
             matched_title = ""
@@ -1004,11 +1028,19 @@ async def api_issues_check_duplicate(request: Request):
                 "issue_number": issue_number,
                 "issue_title": matched_title,
                 "repo": repo_path,
+                "commit_since": commit_since,
+                "issues_checked": issues_checked,
+                "reason": reason,
             }
         except (ValueError, IndexError):
             return {"duplicate": False, "error": f"unexpected Claude response: {claude_out}"}
     else:
-        return {"duplicate": False}
+        return {
+            "duplicate": False,
+            "commit_since": commit_since,
+            "issues_checked": issues_checked,
+            "reason": reason,
+        }
 
 
 @app.get("/api/issues/detect-repo-url")
