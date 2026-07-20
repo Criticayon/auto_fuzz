@@ -995,45 +995,44 @@ async def api_issues_check_duplicate(request: Request):
     claude_out = ""
     try:
         async for msg in claude_query(prompt=prompt, options=options):
-            if isinstance(msg, ResultMessage) and msg.subtype == "success":
-                claude_out = msg.result.strip()
-                break
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         claude_out = block.text.strip()
+            elif isinstance(msg, ResultMessage) and msg.subtype == "success":
+                break
     except Exception as e:
         return {"duplicate": False, "error": f"Claude call failed: {e}"}
 
-    # Parse response: extract reason from second line
+    # Parse response: search for DUPLICATE or NO_DUPLICATE anywhere in the text
+    # 优先匹配 DUPLICATE:#，只要出现就认为是重复
     reason = ""
-    lines = claude_out.split("\n")
-    for line in lines:
-        if line.startswith("REASON:"):
-            reason = line[len("REASON:"):].strip()
-            break
+    issue_number = 0
+    matched_title = ""
+    for line in claude_out.split("\n"):
+        if "DUPLICATE:#" in line:
+            try:
+                num_str = line.split("DUPLICATE:#", 1)[1].strip().split()[0]
+                issue_number = int(num_str)
+            except (ValueError, IndexError):
+                pass
+        elif "REASON:" in line:
+            reason = line.split("REASON:", 1)[1].strip()
 
-    if claude_out.startswith("DUPLICATE:"):
-        try:
-            num_str = claude_out.split("DUPLICATE:#", 1)[1].split("\n")[0].strip()
-            issue_number = int(num_str)
-            # Find matching issue title
-            matched_title = ""
-            for issue in issues:
-                if issue.get("number") == issue_number:
-                    matched_title = issue.get("title", "")
-                    break
-            return {
-                "duplicate": True,
-                "issue_number": issue_number,
-                "issue_title": matched_title,
-                "repo": repo_path,
-                "commit_since": commit_since,
-                "issues_checked": issues_checked,
-                "reason": reason,
-            }
-        except (ValueError, IndexError):
-            return {"duplicate": False, "error": f"unexpected Claude response: {claude_out}"}
+    if issue_number > 0:
+        for issue in issues:
+            if issue.get("number") == issue_number:
+                matched_title = issue.get("title", "")
+                break
+        return {
+            "duplicate": True,
+            "issue_number": issue_number,
+            "issue_title": matched_title,
+            "repo": repo_path,
+            "commit_since": commit_since,
+            "issues_checked": issues_checked,
+            "reason": reason,
+        }
     else:
         return {
             "duplicate": False,

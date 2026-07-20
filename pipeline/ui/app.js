@@ -27,7 +27,7 @@ function addNotification(type, title, msg, keySuffix) {
   _notifKeys.add(key);
   // 持久化到 localStorage，刷新页面后不再弹出同一条通知
   try { localStorage.setItem('af_dismissed', JSON.stringify([..._notifKeys])); } catch(e) {}
-  const icons = {'fuzz-done':'✅','phase4-done':'🎯','stale':'⚠️'};
+  const icons = {'fuzz-done':'✅','phase4-done':'🎯','stale':'⚠️','dup-warn':'⚠️','no-dup':'✅'};
   const card = document.createElement('div');
   card.className = 'notif-card notif-' + type;
   card.innerHTML = '<button class="notif-close">&times;</button>' +
@@ -1000,7 +1000,7 @@ async function checkDuplicate() {
     var parts = [];
     if (d.commit_since) parts.push('Commit: ' + d.commit_since.replace('T', ' ').replace(/\.\d+[+-].+$/, ''));
     if (d.issues_checked) parts.push('Checked: ' + d.issues_checked + ' issues');
-    return parts.length ? '<span style="font-size:11px;opacity:0.7;display:block;margin:4px 0 2px 0;">' + parts.join(' &middot; ') + '</span>' : '';
+    return parts.length ? '<span style="font-size:11px;opacity:0.7;display:block;margin-top:6px;">' + parts.join(' &middot; ') + '</span>' : '';
   }
 
   if (d && d.duplicate) {
@@ -1008,18 +1008,17 @@ async function checkDuplicate() {
     const link = baseUrl
       ? '<a href="' + baseUrl + '/issues/' + d.issue_number + '" target="_blank" style="color:#fbbf24;font-weight:700;text-decoration:underline;">#' + d.issue_number + '</a>'
       : '#' + d.issue_number;
-    addNotification('fuzz-done', 'Potential Duplicate Found',
-      link + (d.issue_title ? ' &mdash; ' + escHtml(d.issue_title) : '') +
+    addNotification('dup-warn', 'Potential Duplicate Found',
+      '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">' + link + ' — 重复</div>' +
+      (d.reason ? '<div style="font-size:12px;opacity:0.9;">' + escHtml(d.reason) + '</div>' : '') +
       fmtMeta(d) +
-      (d.reason ? '<span style="font-size:12px;display:block;margin-top:4px;">' + escHtml(d.reason) + '</span>' : '') +
-      '<br><span style="font-size:11px;opacity:0.7;">' + target + '</span>',
+      '<div style="font-size:11px;opacity:0.7;margin-top:2px;">' + target + '</div>',
       'checkdup-' + target + '-' + Date.now());
   } else if (d && !d.duplicate && !d.error) {
-    addNotification('phase4-done', 'No Duplicate Found',
-      'This issue appears to be unique for <strong>' + target + '</strong>.' +
-      fmtMeta(d) +
-      (d.reason ? '<br><span style="font-size:12px;display:block;margin-top:4px;">' + escHtml(d.reason) + '</span>' : ''),
-      'checkdup-' + target + '-' + Date.now());
+    addNotification('no-dup', 'No Duplicate Found',
+      '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">无重复 — 新 Issue</div>' +
+      (d.reason ? '<div style="font-size:12px;opacity:0.9;">' + escHtml(d.reason) + '</div>' : '') +
+      fmtMeta(d));
   } else {
     addNotification('stale', 'Duplicate Check Failed',
       (d ? d.error : 'Request failed') + ' &mdash; <strong>' + target + '</strong>',

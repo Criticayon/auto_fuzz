@@ -509,6 +509,18 @@
     border: 1px solid #d0c4b4;
   }
   .notif-card.notif-stale .notif-title { color: #d4940c; }
+  .notif-card.notif-dup-warn {
+    background: #1f2937;
+    color: #e2e8f0;
+    border: 1px solid #b8860b;
+  }
+  .notif-card.notif-dup-warn .notif-title { color: #fbbf24; }
+  .notif-card.notif-no-dup {
+    background: #f0fff4;
+    color: #1f5b2e;
+    border: 1px solid #b8e6c6;
+  }
+  .notif-card.notif-no-dup .notif-title { color: #1a7f37; }
 
   .full-fuzz-btn:hover { filter: brightness(1.08) !important; }
 
