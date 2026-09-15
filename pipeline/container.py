@@ -229,26 +229,23 @@ class ContainerManager:
     # ──────────────────────────────────────────
 
     def copy_to_container(self, src_path: str, dest_dir: str) -> None:
-        """将宿主机文件复制到容器内（使用 tar archive）。
+        """将宿主机文件复制到容器内（使用 docker cp CLI）。
 
         Args:
             src_path: 宿主机文件路径
-            dest_dir: 容器内目标目录（必须已存在）
+            dest_dir: 容器内目标目录
         """
-        c = self.ensure_running()
         src = Path(src_path)
         if not src.exists():
             raise ContainerError(f"源文件不存在: {src_path}")
-
-        tar_stream = io.BytesIO()
-        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-            tar.add(str(src), arcname=src.name)
-        tar_stream.seek(0)
-
-        try:
-            c.put_archive(dest_dir, tar_stream)
-        except APIError as e:
-            raise ContainerError(f"复制到容器失败: {e}") from e
+        # 确保容器在运行
+        self.ensure_running()
+        result = subprocess.run(
+            ["docker", "cp", str(src), f"{self.container_name}:{dest_dir}"],
+            capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode != 0:
+            raise ContainerError(f"docker cp 失败: {result.stderr.strip()}")
 
     def copy_from_container(self, src_path: str, dest_dir: str) -> None:
         """将容器内文件复制到宿主机（使用 tar archive）。

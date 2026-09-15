@@ -1,5 +1,6 @@
 """Auto-Fuzz Control Center — Web UI + Pipeline 启动/停止合为一体。"""
 
+import asyncio
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import docker
@@ -19,7 +21,18 @@ STOP_SIGNAL = ".stop_signal"
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Auto-Fuzz Control Center")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """启动资源守护协程；退出时取消，避免 pending task 警告。"""
+    task = asyncio.create_task(_resource_guard_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
+app = FastAPI(title="Auto-Fuzz Control Center", lifespan=lifespan)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONTAINER_NAME = "afl"
@@ -37,6 +50,23 @@ _current_target: str | None = None
 _docker_client: docker.DockerClient | None = None
 _edge_history: dict[str, dict] = {}  # out_dir -> {"edges": int, "changed_at": float}
 _STALE_THRESHOLD = 7200  # 2 hours in seconds
+
+# ── 资源守护阈值（MB）── 达到 warn 弹右下角通知，达到 stop 强制终止所有 fuzz 进程
+DOCKER_MEM_WARN_MB = 8 * 1024        # 内存 8 GB → 告警
+DOCKER_MEM_STOP_MB = 10 * 1024       # 内存 10 GB → 强制停止
+DOCKER_STORAGE_WARN_MB = 16 * 1024   # 容器磁盘 16 GB → 告警
+DOCKER_STORAGE_STOP_MB = 20 * 1024   # 容器磁盘 20 GB → 强制停止
+GUARD_INTERVAL_S = 15                # 守护轮询间隔（秒）
+
+# 由后台守护协程维护的采样结果，/api/status 直接读取，避免每次轮询都跑 du
+_resource_guard: dict = {
+    "mem": {"used_mb": 0, "limit_mb": 0, "level": "ok"},
+    "disk": {"used_mb": 0, "level": "ok"},
+    "stopped_at": 0.0,
+    "stop_reason": "",
+    "stop_count": 0,
+}
+
 _killed_strategies: list[dict] = []
 _easyfuzz_enabled: bool = False  # EasyFuzz toggle state  # 已终止的策略最终状态
 _full_easyfuzz_start: float | None = None
@@ -112,6 +142,112 @@ def _afl_outdirs(procs: list[dict]) -> dict[str, dict]:
 
 def _get_active_outdirs() -> set[str]:
     return set(_afl_outdirs(get_afl_processes()).keys())
+
+
+def _docker_storage_used_mb() -> int:
+    """容器 /workspace 当前占用（MB）。容器不可用时返回 0。"""
+    out = docker_exec("du -sm /workspace 2>/dev/null | cut -f1").strip()
+    try:
+        return int(out)
+    except ValueError:
+        return 0
+
+
+def _docker_memory_used_mb() -> int:
+    """容器当前内存占用（MB），口径同 docker stats：memory.current - inactive_file。
+
+    减去 inactive_file 是因为那部分是页缓存，内核在内存紧张时可直接回收。
+    """
+    out = docker_exec(
+        "cur=$(cat /sys/fs/cgroup/memory.current 2>/dev/null || echo 0); "
+        "ina=$(awk '/^inactive_file /{print $2}' /sys/fs/cgroup/memory.stat 2>/dev/null); "
+        "cur=${cur:-0}; ina=${ina:-0}; "
+        "echo $(( (cur - ina) / 1048576 ))"
+    ).strip()
+    try:
+        return max(0, int(out))
+    except ValueError:
+        return 0
+
+
+def _docker_memory_limit_mb() -> int:
+    """容器 cgroup 内存硬上限（MB）。无限制或容器不可用时返回 0。"""
+    out = docker_exec("cat /sys/fs/cgroup/memory.max 2>/dev/null").strip()
+    try:
+        return int(out) // (1024 * 1024)
+    except ValueError:
+        return 0
+
+
+def _fmt_mb(mb: int) -> str:
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb} MB"
+
+
+def stop_all_fuzz(reason: str = "") -> int:
+    """强制终止容器内所有 afl-fuzz 及其目标子进程，返回终止的 afl-fuzz 数量。
+
+    模式里的 [a]/[w] 是为了让 pkill 自己的命令行不匹配到自身（否则 sh -c 会被先杀掉，
+    后面几条 pkill 就不会执行）。
+    """
+    n = len(get_afl_processes())
+    docker_exec(
+        "pkill -9 -f '[a]fl-fuzz' 2>/dev/null; "
+        "pkill -9 -f '/[w]orkspace/fuzz_' 2>/dev/null; "
+        "pkill -9 -f '/[w]orkspace/easy_fuzz_' 2>/dev/null; "
+        "true"
+    )
+    logger.warning("[guard] force-stopped %d afl-fuzz process(es) — %s", n, reason or "manual")
+    return n
+
+
+def _sample_resources() -> tuple[int, int, int]:
+    """阻塞式采样（供 asyncio.to_thread 调用）：内存占用 / 内存上限 / 磁盘占用（MB）。"""
+    return _docker_memory_used_mb(), _docker_memory_limit_mb(), _docker_storage_used_mb()
+
+
+async def _resource_guard_loop():
+    """后台轮询容器资源：越过 warn 阈值弹通知，越过 stop 阈值强制终止所有 fuzz 进程。"""
+    logger.info(
+        "[guard] resource guard started (mem warn %d / stop %d MB, disk warn %d / stop %d MB)",
+        DOCKER_MEM_WARN_MB, DOCKER_MEM_STOP_MB, DOCKER_STORAGE_WARN_MB, DOCKER_STORAGE_STOP_MB,
+    )
+    while True:
+        try:
+            mem_mb, mem_limit, disk_mb = await asyncio.to_thread(_sample_resources)
+            _resource_guard["mem"].update(used_mb=mem_mb, limit_mb=mem_limit)
+            _resource_guard["disk"]["used_mb"] = disk_mb
+
+            over: list[str] = []
+            if mem_mb >= DOCKER_MEM_STOP_MB:
+                _resource_guard["mem"]["level"] = "stopped"
+                over.append(f"容器内存 {_fmt_mb(mem_mb)} 超过 {_fmt_mb(DOCKER_MEM_STOP_MB)}")
+            elif mem_mb >= DOCKER_MEM_WARN_MB:
+                _resource_guard["mem"]["level"] = "warn"
+            else:
+                _resource_guard["mem"]["level"] = "ok"
+
+            if disk_mb >= DOCKER_STORAGE_STOP_MB:
+                _resource_guard["disk"]["level"] = "stopped"
+                over.append(f"容器磁盘 {_fmt_mb(disk_mb)} 超过 {_fmt_mb(DOCKER_STORAGE_STOP_MB)}")
+            elif disk_mb >= DOCKER_STORAGE_WARN_MB:
+                _resource_guard["disk"]["level"] = "warn"
+            else:
+                _resource_guard["disk"]["level"] = "ok"
+
+            # 只有确实杀掉了进程才更新 stopped_at，否则每轮都会刷新时间戳、
+            # 前端会按新的时间戳重复弹通知
+            if over:
+                killed = stop_all_fuzz("；".join(over))
+                if killed:
+                    _resource_guard.update(
+                        stopped_at=time.time(),
+                        stop_reason="；".join(over),
+                        stop_count=killed,
+                    )
+        except Exception as e:
+            logger.warning("[guard] sample failed: %s", e)
+        await asyncio.sleep(GUARD_INTERVAL_S)
+
 
 
 _FUZZER_STATS_KEYS = {
@@ -264,6 +400,24 @@ async def api_status(target: str = ""):
         "pipeline_running": _pipeline_proc is not None and _pipeline_proc.poll() is None,
         "current_target": _current_target,
         "easyfuzz_enabled": _easyfuzz_enabled,
+        "docker_storage": {
+            "used_mb": _resource_guard["disk"]["used_mb"],
+            "warn_mb": DOCKER_STORAGE_WARN_MB,
+            "limit_mb": DOCKER_STORAGE_STOP_MB,
+        },
+        "docker_memory": {
+            "used_mb": _resource_guard["mem"]["used_mb"],
+            "warn_mb": DOCKER_MEM_WARN_MB,
+            "limit_mb": DOCKER_MEM_STOP_MB,
+            "container_limit_mb": _resource_guard["mem"]["limit_mb"],
+        },
+        "resource_guard": {
+            "mem_level": _resource_guard["mem"]["level"],
+            "disk_level": _resource_guard["disk"]["level"],
+            "stopped_at": _resource_guard["stopped_at"],
+            "stop_reason": _resource_guard["stop_reason"],
+            "stop_count": _resource_guard["stop_count"],
+        },
         "full_easyfuzz": {
             "running": _full_easyfuzz_start is not None and _pipeline_proc is not None and _pipeline_proc.poll() is None,
             "total_min": _full_easyfuzz_duration,
@@ -383,11 +537,34 @@ async def api_easyfuzz_full_result(target: str = ""):
         if result_path.exists():
             try:
                 data = json.loads(result_path.read_text(encoding="utf-8"))
+                # 已确认过的结果不再返回，避免完成通知反复弹出
+                if data.get("notified"):
+                    continue
                 data["project"] = data.get("project", proj_dir.name)
                 results.append(data)
             except Exception:
                 pass
     return {"has_result": len(results) > 0, "results": results}
+
+
+@app.post("/api/easyfuzz/full-result/ack")
+async def api_easyfuzz_full_result_ack(target: str = ""):
+    """将某个项目的完成结果标记为已读，之后不再触发完成通知。"""
+    if not target:
+        return {"error": "no target"}
+    path = BASE_DIR / "outputs" / target / "full_easyfuzz_result.json"
+    if not path.exists():
+        return {"status": "not_found"}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"error": "invalid result"}
+    if data.get("notified"):
+        return {"status": "already_acked"}
+    data["notified"] = True
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    logger.info("[easyfuzz] full result acknowledged for '%s'", target)
+    return {"status": "acked", "target": target}
 
 
 @app.post("/api/easyfuzz/commands")
@@ -486,6 +663,167 @@ async def api_workspace_clean(target: str):
     result = clean_workspace(target)
     logger.info("[clean] workspace cleaned for '%s'", target)
     return result
+
+
+# ──────────────────────────────────────────────
+# Docker 工作区清理：回收有价值数据 → 删除容器内体积
+# 宿主机 outputs/<项目>/ 永不删除。
+# ──────────────────────────────────────────────
+
+
+def _docker_workspace_usage() -> list[dict]:
+    """列出容器 /workspace 下各项目的体积与是否正在 fuzz。"""
+    raw = docker_exec(
+        "for d in /workspace/*/; do "
+        '[ -d "$d" ] || continue; '
+        'b=$(basename "$d"); '
+        'm=$(du -sm "$d" 2>/dev/null | cut -f1); '
+        'echo "$b|${m:-0}"; '
+        "done"
+    )
+    merged: dict[str, dict] = {}
+    for line in raw.splitlines():
+        if "|" not in line:
+            continue
+        name, _, mb = line.rpartition("|")
+        if not name:
+            continue
+        try:
+            mb = int(mb)
+        except ValueError:
+            mb = 0
+        if name.startswith("easy_fuzz_"):
+            base, key = name[len("easy_fuzz_"):], "fuzz_mb"
+        elif name.startswith("fuzz_"):
+            base, key = name[len("fuzz_"):], "fuzz_mb"
+        else:
+            base, key = name, "src_mb"
+        entry = merged.setdefault(base, {"project": base, "src_mb": 0, "fuzz_mb": 0})
+        entry[key] += mb
+
+    procs = get_afl_processes()
+    for entry in merged.values():
+        p = entry["project"]
+        entry["running"] = any(
+            f"fuzz_{p}/" in pr["cmd"] or f"/workspace/{p}/" in pr["cmd"] for pr in procs
+        )
+        entry["total_mb"] = entry["src_mb"] + entry["fuzz_mb"]
+    return sorted(merged.values(), key=lambda e: e["total_mb"], reverse=True)
+
+
+def _docker_cp_from(src_in_container: str, host_dest: Path) -> bool:
+    """把容器内路径复制到宿主机目录。"""
+    host_dest.mkdir(parents=True, exist_ok=True)
+    try:
+        r = subprocess.run(
+            ["docker", "cp", f"{CONTAINER_NAME}:{src_in_container}", str(host_dest)],
+            capture_output=True, text=True, timeout=600,
+        )
+        if r.returncode != 0:
+            logger.warning("[docker-clean] docker cp failed: %s", r.stderr.strip())
+        return r.returncode == 0
+    except Exception as e:
+        logger.warning("[docker-clean] docker cp error: %s", e)
+        return False
+
+
+def _harvest_project(project: str, host_dir: Path) -> dict:
+    """回收容器内该项目的 crash PoC 与 fuzz 统计到宿主机。
+
+    AFL 的 crash 文件名形如 id:000000,sig:11,...，冒号在 Windows 文件名中非法，
+    因此复制时把 ':' 替换为 '_'（其余字符均合法，信息无损失）。
+    """
+    fuzz_dir = f"/workspace/fuzz_{project}"
+    tmp = f"/tmp/_harvest_{project}"
+    docker_exec(f"rm -rf {tmp} && mkdir -p {tmp}/crashes {tmp}/stats")
+    docker_exec(
+        "harv() { "
+        '[ -d "$1" ] || return 0; '
+        'mkdir -p "$2"; '
+        'for f in "$1"/*; do '
+        '[ -f "$f" ] || continue; '
+        'cp "$f" "$2/$(printf %s "$(basename "$f")" | tr ":" "_")" 2>/dev/null; '
+        "done; }; "
+        f'for c in {fuzz_dir}/out_*/crashes; do '
+        '[ -d "$c" ] || continue; '
+        's=$(basename "$(dirname "$c")"); '
+        f'harv "$c" "{tmp}/crashes/$s"; '
+        "done; "
+        f'harv {fuzz_dir}/all_crashes "{tmp}/crashes/all_crashes"; '
+        f'for s in {fuzz_dir}/out_*/; do '
+        '[ -d "$s" ] || continue; '
+        'n=$(basename "$s"); '
+        f'[ -f "$s/fuzzer_stats" ] && cp "$s/fuzzer_stats" "{tmp}/stats/$n.fuzzer_stats" 2>/dev/null; '
+        "done; true"
+    )
+
+    def _count(sub: str) -> int:
+        out = docker_exec(f"find {tmp}/{sub} -type f 2>/dev/null | wc -l").strip()
+        try:
+            return int(out)
+        except ValueError:
+            return 0
+
+    crashes, stats = _count("crashes"), _count("stats")
+    if crashes:
+        _docker_cp_from(f"{tmp}/crashes/.", host_dir / "crashes_raw")
+    if stats:
+        _docker_cp_from(f"{tmp}/stats/.", host_dir / "fuzz_stats_snapshot")
+    docker_exec(f"rm -rf {tmp}")
+    return {"crashes": crashes, "stats": stats}
+
+
+@app.get("/api/docker/usage")
+async def api_docker_usage():
+    """列出容器内可清理的项目及其体积。"""
+    return {"projects": _docker_workspace_usage()}
+
+
+@app.post("/api/docker/clean")
+async def api_docker_clean(request: Request):
+    """回收选定项目的 crash/统计到宿主机，再删除容器内工作区。"""
+    body = await request.json() if request else {}
+    selected = body.get("projects") or []
+    if not selected:
+        return {"error": "no projects selected"}
+
+    usage = {e["project"]: e for e in _docker_workspace_usage()}
+    cleaned, skipped, harvested = [], [], []
+    freed_mb = 0
+
+    for name in selected:
+        entry = usage.get(name)
+        if entry is None:
+            skipped.append({"project": name, "reason": "not_found"})
+            continue
+        if entry.get("running"):
+            skipped.append({"project": name, "reason": "fuzzing"})
+            continue
+
+        host_dir = BASE_DIR / "outputs" / name
+        host_dir.mkdir(parents=True, exist_ok=True)
+        h = _harvest_project(name, host_dir)
+        if h["crashes"] or h["stats"]:
+            harvested.append({"project": name, **h})
+
+        docker_exec(
+            f"rm -rf /workspace/{name} /workspace/fuzz_{name} "
+            f"/workspace/easy_fuzz_{name} 2>/dev/null || true"
+        )
+        freed_mb += entry["total_mb"]
+        cleaned.append(name)
+        logger.info("[docker-clean] cleaned '%s' (freed %d MB, harvested %s)",
+                    name, entry["total_mb"], h)
+
+    logger.info("[docker-clean] done: cleaned=%s skipped=%s freed=%dMB",
+                cleaned, [s["project"] for s in skipped], freed_mb)
+    return {
+        "status": "cleaned",
+        "cleaned": cleaned,
+        "skipped": skipped,
+        "harvested": harvested,
+        "freed_mb": freed_mb,
+    }
 
 
 @app.post("/api/phase/clean")
@@ -968,6 +1306,8 @@ async def api_issues_check_duplicate(request: Request):
         summary = body_text[:500].replace("\n", " ")
         recent.append(f"#{num}: {title}\n  {summary}")
 
+    recent_text = "\n\n".join(recent)
+
     issues_checked = len(recent)
     prompt = (
         f"请将下面的新 Issue 内容与提供的 {issues_checked} 个已有 GitHub Issue 进行语义对比。\n"
@@ -1126,6 +1466,13 @@ async def index():
 
 
 def main(port: int = 8765):
+    # 让 logger.* 真正输出到控制台 —— 资源守护的强制停止、清理、停止等
+    # 破坏性操作必须留下可追溯的日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "gb18030"):
         globe = "[globe]"
     else:

@@ -370,6 +370,24 @@
   .ref-btn-primary:hover { background: #0550ae; border-color: #0550ae; }
   .ref-btn-default { background: #f6f8fa; border-color: #d0d7de; color: #656d76; }
   .ref-btn-default:hover { background: #eaeef2; color: #24292f; }
+  .ref-btn-danger { background: #cf222e; border-color: #cf222e; color: #fff; }
+  .ref-btn-danger:hover { background: #a40e26; border-color: #a40e26; }
+  .ref-btn-danger:disabled { background: #f3c2c6; border-color: #f3c2c6; cursor: not-allowed; }
+
+  /* ===== Clean Docker Dialog ===== */
+  .clean-docker-list { max-height: 320px; overflow-y: auto; border: 1px solid #e0d0be; border-radius: 8px; background: #fffef8; }
+  .clean-docker-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f2e9dd; font-size: 13px; cursor: pointer; }
+  .clean-docker-row:last-child { border-bottom: none; }
+  .clean-docker-row:hover { background: #faf3e8; }
+  .clean-docker-row.disabled { opacity: .55; cursor: not-allowed; }
+  .clean-docker-row.disabled:hover { background: transparent; }
+  .clean-docker-row input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+  .clean-docker-row.disabled input[type="checkbox"] { cursor: not-allowed; }
+  .clean-docker-name { font-weight: 600; color: #1f2328; min-width: 96px; }
+  .clean-docker-size { margin-left: auto; color: #656d76; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .clean-docker-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #fff1c9; color: #9a6700; font-weight: 600; }
+  .clean-docker-summary { margin-top: 12px; font-size: 13px; font-weight: 600; color: #24292f; }
+  .clean-docker-empty { padding: 22px; text-align: center; color: #656d76; font-size: 13px; }
   .ref-panel { background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
   .ref-panel textarea { width: 100%; min-height: 80px; border: 1px solid #d0d7de; border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; }
   .ref-panel textarea:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 2px #0969da22; }
@@ -521,6 +539,29 @@
     border: 1px solid #b8e6c6;
   }
   .notif-card.notif-no-dup .notif-title { color: #1a7f37; }
+
+  /* ===== Docker Storage Bar ===== */
+  .storage-bar { height: 14px; border-radius: 7px; background: #e8ddd0; border: 1px solid #ddcdb9; overflow: hidden; }
+  .storage-fill { height: 100%; width: 0; border-radius: 6px; background: linear-gradient(90deg, #2da44e, #1a7f37); transition: width .5s ease, background .5s ease; }
+  .storage-fill.warn { background: linear-gradient(90deg, #d4940c, #9a6700); }
+  .storage-fill.crit { background: linear-gradient(90deg, #cf222e, #a40e26); }
+
+  .notif-card.notif-resource-warn {
+    background: #fff5f5;
+    color: #6b1a1a;
+    border: 1px solid #f0b8b8;
+  }
+  .notif-card.notif-resource-warn .notif-title { color: #cf222e; }
+
+  .notif-card.notif-resource-stop {
+    background: #a40e26;
+    color: #ffe9ec;
+    border: 1px solid #7d0a1c;
+    box-shadow: 0 6px 22px rgba(164, 14, 38, .38);
+  }
+  .notif-card.notif-resource-stop .notif-title { color: #ffd7dd; }
+  .notif-card.notif-resource-stop .notif-close { color: #ffe9ec; }
+  .notif-card.notif-resource-stop code { background: rgba(255, 255, 255, .16); color: #fff; }
 
   .full-fuzz-btn:hover { filter: brightness(1.08) !important; }
 

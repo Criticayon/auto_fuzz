@@ -27,7 +27,7 @@ function addNotification(type, title, msg, keySuffix) {
   _notifKeys.add(key);
   // 持久化到 localStorage，刷新页面后不再弹出同一条通知
   try { localStorage.setItem('af_dismissed', JSON.stringify([..._notifKeys])); } catch(e) {}
-  const icons = {'fuzz-done':'✅','phase4-done':'🎯','stale':'⚠️','dup-warn':'⚠️','no-dup':'✅'};
+  const icons = {'fuzz-done':'✅','phase4-done':'🎯','stale':'⚠️','dup-warn':'⚠️','no-dup':'✅','clean-done':'🗑️','resource-warn':'\uD83D\uDCBE','resource-stop':'\uD83D\uDED1'};
   const card = document.createElement('div');
   card.className = 'notif-card notif-' + type;
   card.innerHTML = '<button class="notif-close">&times;</button>' +
@@ -206,6 +206,7 @@ function updateDashboard() {
     document.getElementById('totalEdges').textContent = (d.total_edges||0).toLocaleString();
     document.getElementById('totalCrashes').textContent = (d.total_crashes||0).toLocaleString();
     document.getElementById('staleCount').textContent = d.stale_count || 0;
+    updateResources(d);
 
     // 过期策略通知（堆叠通知，不会自动消失）
     const staleStrats = (d.strategies||[]).filter(s => s.stale).map(s => s.name);
@@ -1018,7 +1019,8 @@ async function checkDuplicate() {
     addNotification('no-dup', 'No Duplicate Found',
       '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">无重复 — 新 Issue</div>' +
       (d.reason ? '<div style="font-size:12px;opacity:0.9;">' + escHtml(d.reason) + '</div>' : '') +
-      fmtMeta(d));
+      fmtMeta(d),
+      'checkdup-' + target + '-' + Date.now());
   } else {
     addNotification('stale', 'Duplicate Check Failed',
       (d ? d.error : 'Request failed') + ' &mdash; <strong>' + target + '</strong>',
@@ -1238,6 +1240,204 @@ async function saveFullFuzzConfig() {
   }
 }
 
+// ===== Clean Docker Workspace（垃圾桶按钮）=====
+var _cleanDockerItems = [];
+
+function _fmtMB(mb) {
+  mb = mb || 0;
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB';
+}
+
+function _cleanDockerSizeOf(project) {
+  for (var i = 0; i < _cleanDockerItems.length; i++) {
+    if (_cleanDockerItems[i].project === project) return _cleanDockerItems[i].total_mb || 0;
+  }
+  return 0;
+}
+
+// ===== Dashboard: 资源告警（内存 / Docker 存储）=====
+// 服务端守护协程负责采样与强制停止，这里只负责画进度条和弹通知。
+// 阈值默认值与 webui.py 保持一致，实际以服务端返回的 warn_mb/limit_mb 为准。
+var RES_DEFAULT = {
+  mem:  { warn: 8 * 1024,  stop: 10 * 1024 },
+  disk: { warn: 16 * 1024, stop: 20 * 1024 },
+};
+
+function _clearResKey(kind) {
+  var k = 'resource-warn|' + kind;
+  if (_notifKeys.has(k)) {
+    _notifKeys.delete(k);
+    try { localStorage.setItem('af_dismissed', JSON.stringify([..._notifKeys])); } catch(e) {}
+  }
+}
+
+function _renderResBar(fillId, textId, usedMb, stopMb, warnMb) {
+  const fill = document.getElementById(fillId);
+  const text = document.getElementById(textId);
+  if (!fill || !text) return;
+  const pct = stopMb > 0 ? Math.min(100, (usedMb / stopMb) * 100) : 0;
+  const level = usedMb >= stopMb ? 'crit' : usedMb >= warnMb ? 'warn' : '';
+  fill.style.width = pct.toFixed(1) + '%';
+  fill.className = 'storage-fill' + (level ? ' ' + level : '');
+  text.textContent = _fmtMB(usedMb) + ' / ' + _fmtMB(stopMb) + '（' + pct.toFixed(1) + '%）';
+  text.style.color = level === 'crit' ? '#cf222e' : level === 'warn' ? '#9a6700' : '#656d76';
+}
+
+function updateResources(d) {
+  const mem = d.docker_memory || {};
+  const disk = d.docker_storage || {};
+  const g = d.resource_guard || {};
+
+  const memUsed = mem.used_mb || 0;
+  const memWarn = mem.warn_mb || RES_DEFAULT.mem.warn;
+  const memStop = mem.limit_mb || RES_DEFAULT.mem.stop;
+  const diskUsed = disk.used_mb || 0;
+  const diskWarn = disk.warn_mb || RES_DEFAULT.disk.warn;
+  const diskStop = disk.limit_mb || RES_DEFAULT.disk.stop;
+
+  _renderResBar('memStorageFill', 'memStorageText', memUsed, memStop, memWarn);
+  _renderResBar('dockerStorageFill', 'dockerStorageText', diskUsed, diskStop, diskWarn);
+
+  const hint = document.getElementById('memStorageHint');
+  if (hint) {
+    hint.textContent = '容器内存占用，' + _fmtMB(memWarn) + ' 告警 / ' + _fmtMB(memStop) + ' 强制停止'
+      + (mem.container_limit_mb ? '（cgroup 硬上限 ' + _fmtMB(mem.container_limit_mb) + '）' : '');
+  }
+
+  // 内存告警（回落至阈值以下解除，允许下次重新告警）
+  if (memUsed >= memWarn) {
+    addNotification('resource-warn', '容器内存占用过高',
+      '当前 <strong>' + _fmtMB(memUsed) + '</strong>，已超过 ' + _fmtMB(memWarn) +
+      ' 告警线；达到 ' + _fmtMB(memStop) + ' 将自动终止所有 fuzz 进程。', 'mem');
+  } else {
+    _clearResKey('mem');
+  }
+
+  // 磁盘告警
+  if (diskUsed >= diskWarn) {
+    addNotification('resource-warn', 'Docker 存储占用过高',
+      '容器 <code>/workspace</code> 已用 <strong>' + _fmtMB(diskUsed) + '</strong>，已超过 ' +
+      _fmtMB(diskWarn) + ' 告警线；达到 ' + _fmtMB(diskStop) +
+      ' 将自动终止所有 fuzz 进程。可点右上角 🗑 清理已完成项目。', 'disk');
+  } else {
+    _clearResKey('disk');
+  }
+
+  // 强制停止事件（服务端已执行）—— 按 stopped_at 去重，刷新页面不会重复弹
+  if (g.stopped_at && (g.mem_level === 'stopped' || g.disk_level === 'stopped')) {
+    addNotification('resource-stop', '已强制停止所有 Fuzz 进程',
+      g.stop_reason + '，已终止 <strong>' + (g.stop_count || 0) + '</strong> 个 afl-fuzz 进程。' +
+      '请降低 <code>-m</code> 或并发实例数后重启。', String(g.stopped_at));
+  }
+}
+
+async function showCleanDockerDialog() {
+  const list = document.getElementById('cleanDockerList');
+  const status = document.getElementById('cleanDockerStatus');
+  const confirmBtn = document.getElementById('cleanDockerConfirm');
+  status.style.display = 'none';
+  confirmBtn.disabled = true;
+  document.getElementById('cleanDockerSummary').textContent = '';
+  list.innerHTML = '<div class="clean-docker-empty">扫描容器中…</div>';
+  document.getElementById('cleanDockerDialog').style.display = 'flex';
+
+  const r = await api('/api/docker/usage');
+  const items = (r && r.projects) || [];
+  _cleanDockerItems = items;
+  if (!items.length) {
+    list.innerHTML = '<div class="clean-docker-empty">容器内没有可清理的项目</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  items.forEach(function(it) {
+    const row = document.createElement('label');
+    row.className = 'clean-docker-row' + (it.running ? ' disabled' : '');
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.project = it.project;
+    cb.checked = !it.running;
+    cb.disabled = !!it.running;
+    cb.onchange = updateCleanDockerSummary;
+    row.appendChild(cb);
+
+    const name = document.createElement('span');
+    name.className = 'clean-docker-name';
+    name.textContent = it.project;
+    row.appendChild(name);
+
+    if (it.running) {
+      const tag = document.createElement('span');
+      tag.className = 'clean-docker-tag';
+      tag.textContent = 'fuzzing';
+      row.appendChild(tag);
+    }
+
+    const size = document.createElement('span');
+    size.className = 'clean-docker-size';
+    size.textContent = _fmtMB(it.total_mb) +
+      (it.fuzz_mb ? '（源码 ' + _fmtMB(it.src_mb) + ' + fuzz ' + _fmtMB(it.fuzz_mb) + '）' : '');
+    row.appendChild(size);
+
+    list.appendChild(row);
+  });
+  updateCleanDockerSummary();
+}
+
+function updateCleanDockerSummary() {
+  var total = 0, n = 0;
+  document.querySelectorAll('#cleanDockerList input[type=checkbox]').forEach(function(cb) {
+    if (cb.checked && !cb.disabled) { n++; total += _cleanDockerSizeOf(cb.dataset.project); }
+  });
+  document.getElementById('cleanDockerSummary').textContent =
+    n ? '已选 ' + n + ' 个项目，将释放约 ' + _fmtMB(total) : '未选择任何项目';
+  document.getElementById('cleanDockerConfirm').disabled = n === 0;
+}
+
+function closeCleanDockerDialog() {
+  document.getElementById('cleanDockerDialog').style.display = 'none';
+}
+
+async function cleanDocker() {
+  const selected = [];
+  document.querySelectorAll('#cleanDockerList input[type=checkbox]').forEach(function(cb) {
+    if (cb.checked && !cb.disabled) selected.push(cb.dataset.project);
+  });
+  if (!selected.length) return;
+
+  const confirmBtn = document.getElementById('cleanDockerConfirm');
+  const status = document.getElementById('cleanDockerStatus');
+  confirmBtn.disabled = true;
+  status.style.display = 'inline';
+  status.style.color = '#9a6700';
+  status.textContent = '清理中…';
+
+  const r = await api('/api/docker/clean', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({projects: selected})
+  });
+
+  if (r && r.status === 'cleaned') {
+    const freed = _fmtMB(r.freed_mb || 0);
+    const harvested = (r.harvested || []).length;
+    const skipped = (r.skipped || []).length;
+    status.style.color = '#1a7f37';
+    status.textContent = '已清理，释放 ' + freed;
+    addNotification('clean-done', 'Docker 工作区已清理',
+      '释放 <strong>' + freed + '</strong>' +
+      (harvested ? '，回收 ' + harvested + ' 个项目的数据' : '') +
+      (skipped ? '，跳过 ' + skipped + ' 个（正在 fuzz）' : ''),
+      String(Date.now()));
+    setTimeout(closeCleanDockerDialog, 1200);
+  } else {
+    status.style.color = '#cf222e';
+    status.textContent = (r && r.error) ? r.error : '清理失败';
+    confirmBtn.disabled = false;
+  }
+}
+
 // 检测 easy-fuzz / full-pipeline fuzz 完成 → 通知（全局扫描，不依赖当前选中的项目）
 async function checkFuzzCompletion() {
   const r = await api('/api/easyfuzz/full-result');
@@ -1250,6 +1450,8 @@ async function checkFuzzCompletion() {
     addNotification('fuzz-done', proj + ' Fuzzing Complete',
       proj + ' fuzz 了 ' + timeStr + '，发现了 <strong>' + (item.crashes||0) + '</strong> 个 crash',
       proj);  // keySuffix = project name, 保证每个项目最多一条
+    // 标记服务端已读，之后不再返回该结果，跨浏览器/清缓存都不会重复弹
+    await api('/api/easyfuzz/full-result/ack?target=' + encodeURIComponent(proj), {method: 'POST'});
   }
 }
 

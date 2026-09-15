@@ -17,6 +17,11 @@
     <div class="subtitle">Vulnerability Discovery Pipeline</div>
   </div>
   <div style="display:flex;align-items:center;gap:16px;">
+    <button id="btnCleanDocker" class="kill-fuzz-btn" onclick="showCleanDockerDialog()" title="清理 Docker 工作区（先回收 crash/统计到宿主机，再删除容器内体积）">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M6.5 1a1 1 0 0 0-1 1v.5H3.25a.75.75 0 0 0 0 1.5h.44l.6 9.1A1.75 1.75 0 0 0 6.03 14.7h3.94a1.75 1.75 0 0 0 1.74-1.6l.6-9.1h.44a.75.75 0 0 0 0-1.5H10.5V2a1 1 0 0 0-1-1h-3Zm2.5 1.5V2h-2v.5h2ZM5.2 3.5h5.6l-.59 9.02a.25.25 0 0 1-.25.23H6.03a.25.25 0 0 1-.25-.23L5.2 3.5Z"/>
+      </svg>
+    </button>
     <button id="btnKillFuzz" class="kill-fuzz-btn" onclick="stopAll()" title="Stop all fuzzing processes">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
         <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor"/>
@@ -73,6 +78,32 @@
           <div class="card"><div class="label">Edges Found</div><div class="value green" id="totalEdges">—</div></div>
           <div class="card"><div class="label">Crashes</div><div class="value red" id="totalCrashes">—</div></div>
           <div class="card"><div class="label">Stale (2h+)</div><div class="value" id="staleCount" style="color:#d4940c;">—</div></div>
+        </div>
+      </div>
+
+      <!-- ===== Docker Memory ===== -->
+      <div class="dashboard-section" id="dockerMemorySection">
+        <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px;">
+          <div class="section-title" style="margin:0;">Docker Memory</div>
+          <span class="spacer" style="flex:1;"></span>
+          <span id="memStorageText" style="font-size:13px;font-weight:600;color:#656d76;">—</span>
+        </div>
+        <div class="storage-bar"><div class="storage-fill" id="memStorageFill"></div></div>
+        <div style="margin-top:7px;font-size:12px;color:#8b949e;" id="memStorageHint">
+          容器内存占用，8 GB 告警 / 10 GB 强制停止
+        </div>
+      </div>
+
+      <!-- ===== Docker Storage ===== -->
+      <div class="dashboard-section" id="dockerStorageSection">
+        <div style="display:flex;align-items:baseline;gap:10px;margin:0 0 10px;">
+          <div class="section-title" style="margin:0;">Docker Storage</div>
+          <span class="spacer" style="flex:1;"></span>
+          <span id="dockerStorageText" style="font-size:13px;font-weight:600;color:#656d76;">—</span>
+        </div>
+        <div class="storage-bar"><div class="storage-fill" id="dockerStorageFill"></div></div>
+        <div style="margin-top:7px;font-size:12px;color:#8b949e;">
+          容器 <code>/workspace</code> 占用，16 GB 告警 / 20 GB 强制停止
         </div>
       </div>
 
@@ -305,6 +336,26 @@
       <span id="fullFuzzSaveStatus" style="font-size:13px;color:#1a7f37;display:none;">&#10003; 已设置完毕</span>
       <button class="ref-btn ref-btn-default" onclick="closeFullFuzzDialog()">取消</button>
       <button class="ref-btn ref-btn-primary" onclick="saveFullFuzzConfig()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="cleanDockerDialog" class="modal-overlay" style="display:none;">
+  <div class="modal-box" style="width:540px;">
+    <div class="modal-header">&#128465; 清理 Docker 工作区</div>
+    <div class="modal-body">
+      <p style="margin:0 0 14px;font-size:13px;color:#656d76;line-height:1.6;">
+        容器内的源码与编译产物将被删除（重跑需重新 Phase 2 构建）。<br>
+        crash PoC 与 fuzz 统计会先回收至宿主机 <code>outputs/&lt;项目&gt;/</code>，
+        <strong>宿主机数据不会被删除</strong>。正在 fuzz 的项目无法勾选。
+      </p>
+      <div id="cleanDockerList" class="clean-docker-list"></div>
+      <div id="cleanDockerSummary" class="clean-docker-summary"></div>
+    </div>
+    <div class="modal-footer">
+      <span id="cleanDockerStatus" style="font-size:13px;color:#1a7f37;display:none;margin-right:auto;"></span>
+      <button class="ref-btn ref-btn-default" onclick="closeCleanDockerDialog()">取消</button>
+      <button class="ref-btn ref-btn-danger" id="cleanDockerConfirm" onclick="cleanDocker()" disabled>清理</button>
     </div>
   </div>
 </div>
